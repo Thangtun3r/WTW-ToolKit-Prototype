@@ -1,7 +1,9 @@
+
 local Editor = require("editor")
 local GameManager = require("gameManager")
 local Block = require("block")
 local Crusher = require("crusher")
+local StepTracker = require("stepTracker")
 
 local directionImg = love.graphics.newImage("Direction.png")
 
@@ -21,8 +23,61 @@ end
 
 local previousEditorMode = "block"
 local pressedColorKeys = {}
+local lastStepKey = ""
+local originalState = nil
 
 function love.keypressed(key, scancode, isrepeat)
+    -- Track last step key for indicator
+    if key == 'f5' then lastStepKey = 'F5 (Start Tracking)' end
+    if key == 'f6' then lastStepKey = 'F6 (Stop/Revert)' end
+    if key == 'f7' then lastStepKey = 'F7 (Restore Original)' end
+    if key == 'z' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Z (Undo)' end
+    -- StepTracker controls
+    if key == 'f5' then -- Start tracking
+        -- Save original state for F7 restore
+        originalState = {
+            blocks = StepTracker.deepCopy(GameManager.blocks),
+            crushers = StepTracker.deepCopy(GameManager.crushers),
+            -- Optionally add editor state if needed
+        }
+        StepTracker.start({
+            blocks = GameManager.blocks,
+            crushers = GameManager.crushers,
+            editor = Editor,
+        })
+        print("Step tracking started")
+        return
+    elseif key == 'f6' then -- Stop tracking and revert
+        local state = StepTracker.revert()
+        if state then
+            GameManager.blocks = StepTracker.deepCopy(state.blocks)
+            GameManager.crushers = StepTracker.deepCopy(state.crushers)
+            -- Optionally restore editor state if needed
+        end
+        StepTracker.stop()
+        print("Step tracking stopped and reverted")
+        return
+    elseif key == 'f7' then -- Restore original state after tracking
+        if originalState then
+            GameManager.blocks = StepTracker.deepCopy(originalState.blocks)
+            GameManager.crushers = StepTracker.deepCopy(originalState.crushers)
+            print("Restored to original state before tracking")
+        end
+        return
+    elseif key == 'z' and love.keyboard.isDown('lctrl','rctrl') then -- Undo
+        if StepTracker.active then
+            local state = StepTracker.undo({
+                blocks = GameManager.blocks,
+                crushers = GameManager.crushers,
+                editor = Editor,
+            })
+            if state then
+                GameManager.blocks = StepTracker.deepCopy(state.blocks)
+                GameManager.crushers = StepTracker.deepCopy(state.crushers)
+            end
+        end
+        return
+    end
     -- Toggle eraser mode with 'e'
     if key == 'e' then
         Editor.eraserMode = not Editor.eraserMode
@@ -169,6 +224,21 @@ function love.mousepressed(x, y, button)
             for i = #GameManager.crushers, 1, -1 do
                 local c = GameManager.crushers[i]
                 if c.gridX == gx and c.gridY == gy then
+                    if StepTracker.active then
+                        StepTracker.recordStep({
+                            type = "remove_crusher",
+                            gx = gx, gy = gy,
+                            apply = function(state)
+                                for j = #state.crushers, 1, -1 do
+                                    local cc = state.crushers[j]
+                                    if cc.gridX == gx and cc.gridY == gy then
+                                        table.remove(state.crushers, j)
+                                        break
+                                    end
+                                end
+                            end
+                        })
+                    end
                     table.remove(GameManager.crushers, i)
                     return
                 end
@@ -178,6 +248,15 @@ function love.mousepressed(x, y, button)
                 local b = GameManager.blocks[i]
                 for _, s in ipairs(b.segments) do
                     if gx == b.gridX + s.x and gy == b.gridY + s.y then
+                        if StepTracker.active then
+                            StepTracker.recordStep({
+                                type = "remove_block",
+                                blockIdx = i,
+                                apply = function(state)
+                                    table.remove(state.blocks, i)
+                                end
+                            })
+                        end
                         table.remove(GameManager.blocks, i)
                         return
                     end
@@ -200,6 +279,21 @@ function love.mousepressed(x, y, button)
                     end
                 end
                 if not exists then
+                    if StepTracker.active then
+                        local color1 = Editor.selectedColors[1]
+                        local color2 = Editor.selectedColors[2]
+                        StepTracker.recordStep({
+                            type = "add_crusher",
+                            gx = gx, gy = gy, color1 = color1, color2 = color2,
+                            apply = function(state)
+                                if color2 then
+                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1], Editor.palette[color2]))
+                                else
+                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1]))
+                                end
+                            end
+                        })
+                    end
                     if #Editor.selectedColors == 1 then
                         table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]]))
                     elseif #Editor.selectedColors >= 2 then
@@ -227,6 +321,18 @@ function love.mousepressed(x, y, button)
                 -- Match visual position to grid immediately for the start of the lerp
                 newBlock.viewX = margin.x + gx * GameManager.grid.cellSize
                 newBlock.viewY = margin.y + gy * GameManager.grid.cellSize
+                if StepTracker.active then
+                    StepTracker.recordStep({
+                        type = "add_block",
+                        gx = gx, gy = gy, segments = b.segments, color = b.color, moveAxis = b.moveAxis,
+                        apply = function(state)
+                            local block = Block.new(gx, gy, b.segments, b.color, b.moveAxis, GameManager.grid.cellSize)
+                            block.viewX = margin.x + gx * GameManager.grid.cellSize
+                            block.viewY = margin.y + gy * GameManager.grid.cellSize
+                            table.insert(state.blocks, block)
+                        end
+                    })
+                end
                 table.insert(GameManager.blocks, newBlock)
                 Editor.isPlacing = false
                 Editor.heldBlock = nil
@@ -319,29 +425,49 @@ function love.mousereleased(x, y, button)
         if dragStart.active and dragStart.idx and dragDirection then
             local b = GameManager.blocks[dragStart.idx]
             if b then
+                local oldX, oldY = b.gridX, b.gridY
                 local gx, gy = b.gridX, b.gridY
                 local step = 0
-                
+                local moved = false
                 if dragDirection == "horizontal" and (b.moveAxis == "horizontal" or b.moveAxis == "both") then
                     step = (x > dragStart.x) and 1 or -1
                     while true do
                         local nextX = gx + step
-                        -- Corrected call to canBlockFit
                         if not GameManager.canBlockFit(dragStart.idx, nextX, gy) then break end
                         gx = nextX
                         if gx <= 0 or gx >= GameManager.grid.cols - 1 then break end
                     end
+                    if gx ~= oldX then moved = true end
                     b.gridX = gx
                 elseif dragDirection == "vertical" and (b.moveAxis == "vertical" or b.moveAxis == "both") then
                     step = (y > dragStart.y) and 1 or -1
                     while true do
                         local nextY = gy + step
-                        -- Corrected call to canBlockFit
                         if not GameManager.canBlockFit(dragStart.idx, gx, nextY) then break end
                         gy = nextY
                         if gy <= 0 or gy >= GameManager.grid.rows - 1 then break end
                     end
+                    if gy ~= oldY then moved = true end
                     b.gridY = gy
+                end
+                -- Track block move as a step
+                if moved and StepTracker.active then
+                    local idx = dragStart.idx
+                    local fromX, fromY = oldX, oldY
+                    local toX, toY = b.gridX, b.gridY
+                    StepTracker.recordStep({
+                        type = "move_block",
+                        blockIdx = idx,
+                        fromX = fromX, fromY = fromY,
+                        toX = toX, toY = toY,
+                        apply = function(state)
+                            local block = state.blocks[idx]
+                            if block then
+                                block.gridX = toX
+                                block.gridY = toY
+                            end
+                        end
+                    })
                 end
             end
         end
@@ -361,6 +487,13 @@ function love.mousereleased(x, y, button)
 end
 
 function love.draw()
+    -- Tracking indicator and step count
+    love.graphics.setColor(1, 1, 1, 1)
+    local trackingText = StepTracker.active and ("[TRACKING]  Steps: " .. tostring(StepTracker.stepCount or 0)) or "[NOT TRACKING]"
+    love.graphics.print(trackingText, 10, 10)
+    if lastStepKey ~= "" then
+        love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
+    end
     local cellSize = GameManager.grid.cellSize
 
     love.graphics.push()
