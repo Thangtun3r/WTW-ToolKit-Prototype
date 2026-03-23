@@ -9,10 +9,92 @@ local dragStart = { x = 0, y = 0, active = false, idx = nil }
 local dragDirection = nil 
 local margin = { x = 60, y = 60 }
 
+
 function love.load()
     love.window.setMode(1000, 700)
     Editor.load()
     Editor.offsetX = 650
+end
+
+
+
+
+local previousEditorMode = "block"
+local pressedColorKeys = {}
+
+function love.keypressed(key, scancode, isrepeat)
+    -- Toggle eraser mode with 'e'
+    if key == 'e' then
+        Editor.eraserMode = not Editor.eraserMode
+        if Editor.eraserMode then
+            previousEditorMode = Editor.mode or previousEditorMode
+            Editor.mode = nil
+        else
+            Editor.mode = previousEditorMode or "block"
+        end
+    end
+    -- Toggle crusher mode with 'c'
+    if key == 'c' then
+        Editor.mode = "crusher"
+        previousEditorMode = "crusher"
+        Editor.eraserMode = false
+    end
+    -- Toggle block mode with 'b'
+    if key == 'b' then
+        Editor.mode = "block"
+        previousEditorMode = "block"
+        Editor.eraserMode = false
+    end
+    -- Number keys for color selection (1-6):
+    local num = tonumber(key)
+    if num and num >= 1 and num <= #Editor.palette then
+        pressedColorKeys[num] = true
+        -- Count how many color keys are currently pressed
+        local count = 0
+        for i = 1, #Editor.palette do
+            if pressedColorKeys[i] then count = count + 1 end
+        end
+        if count == 1 then
+            -- Only one key pressed: single color mode
+            Editor.selectedColors = {num}
+        else
+            -- Multi-key: add all currently pressed keys
+            Editor.selectedColors = {}
+            for i = 1, #Editor.palette do
+                if pressedColorKeys[i] then table.insert(Editor.selectedColors, i) end
+            end
+        end
+        return
+    end
+end
+
+
+
+function love.keyreleased(key, scancode)
+    local num = tonumber(key)
+    if num and num >= 1 and num <= #Editor.palette then
+        pressedColorKeys[num] = nil
+        -- Count how many color keys are currently pressed
+        local count = 0
+        for i = 1, #Editor.palette do
+            if pressedColorKeys[i] then count = count + 1 end
+        end
+        if count == 1 then
+            -- Only one left: single color mode
+            for i = 1, #Editor.palette do
+                if pressedColorKeys[i] then Editor.selectedColors = {i} end
+            end
+        elseif count > 1 then
+            -- Multi-key: add all currently pressed keys
+            Editor.selectedColors = {}
+            for i = 1, #Editor.palette do
+                if pressedColorKeys[i] then table.insert(Editor.selectedColors, i) end
+            end
+        else
+            -- None left: keep last released as selected
+            Editor.selectedColors = {num}
+        end
+    end
 end
 
 function love.update(dt)
@@ -82,6 +164,7 @@ function love.mousepressed(x, y, button)
 
         -- 2. ERASER CHECK: If eraser is on, we only remove things
         if Editor.eraserMode then
+            Editor.painting = true
             -- Remove Crushers
             for i = #GameManager.crushers, 1, -1 do
                 local c = GameManager.crushers[i]
@@ -103,9 +186,10 @@ function love.mousepressed(x, y, button)
             return
         end
 
-        -- 3. CRUSHER PLACEMENT: Only if Editor mode is set to crusher
+        -- 3. CRUSHER PAINTING: If Editor mode is set to crusher, enable painting
         if Editor.mode == "crusher" then
-            -- Only allow placement on the border (X: 0 or 7, Y: 0 or 9)
+            Editor.painting = true
+            -- Place crusher at initial click
             local isBorder = (gx == 0 or gx == 7 or gy == 0 or gy == 9)
             if isBorder then
                 local exists = false
@@ -115,7 +199,6 @@ function love.mousepressed(x, y, button)
                         break
                     end
                 end
-                
                 if not exists then
                     if #Editor.selectedColors == 1 then
                         table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]]))
@@ -167,8 +250,54 @@ function love.mousepressed(x, y, button)
 end
 
 function love.mousemoved(x, y, dx, dy)
+
     if Editor.painting then
-        Editor.mousemoved(x, y)
+        if Editor.eraserMode then
+            -- Paint erase while dragging
+            local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
+            local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
+            -- Remove Crushers
+            for i = #GameManager.crushers, 1, -1 do
+                local c = GameManager.crushers[i]
+                if c.gridX == gx and c.gridY == gy then
+                    table.remove(GameManager.crushers, i)
+                    break
+                end
+            end
+            -- Remove Blocks
+            for i = #GameManager.blocks, 1, -1 do
+                local b = GameManager.blocks[i]
+                for _, s in ipairs(b.segments) do
+                    if gx == b.gridX + s.x and gy == b.gridY + s.y then
+                        table.remove(GameManager.blocks, i)
+                        break
+                    end
+                end
+            end
+        elseif Editor.mode == "crusher" then
+            -- Paint crushers while dragging
+            local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
+            local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
+            local isBorder = (gx == 0 or gx == 7 or gy == 0 or gy == 9)
+            if isBorder then
+                local exists = false
+                for _, c in ipairs(GameManager.crushers) do
+                    if c.gridX == gx and c.gridY == gy then
+                        exists = true
+                        break
+                    end
+                end
+                if not exists then
+                    if #Editor.selectedColors == 1 then
+                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]]))
+                    elseif #Editor.selectedColors >= 2 then
+                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]], Editor.palette[Editor.selectedColors[2]]))
+                    end
+                end
+            end
+        else
+            Editor.mousemoved(x, y)
+        end
         return
     end
 
@@ -219,9 +348,14 @@ function love.mousereleased(x, y, button)
 
         dragStart = { x = 0, y = 0, active = false, idx = nil }
         dragDirection = nil
-        
+
         if Editor.painting then
-            Editor.mousereleased()
+            Editor.painting = false
+            if Editor.mode == "crusher" then
+                -- Do nothing extra for crusher painting
+            else
+                Editor.mousereleased()
+            end
         end
     end
 end
