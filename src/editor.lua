@@ -15,6 +15,7 @@ local Editor = {
     heldBlock = nil,
     painting = false,
     paintMode = true, -- true = draw, false = erase
+    explosionMode = false,
     directionOptions = {"horizontal", "vertical", "static"},
     selectedDirectionIdx = 2,
     directionDropdownOpen = false,
@@ -37,7 +38,11 @@ function Editor.mousemoved(x, y)
         local gx = math.floor((x - hb.x) / Editor.cellSize)
         local gy = math.floor((y - hb.y) / Editor.cellSize)
         if gx >= 0 and gx <= 2 and gy >= 0 and gy <= 2 then
-            Editor.drawGrid[gx][gy] = Editor.paintMode -- Follow the mode set on first click
+            if Editor.paintMode then
+                Editor.drawGrid[gx][gy] = (Editor.explosionMode and "dynamite") or true
+            else
+                Editor.drawGrid[gx][gy] = false
+            end
         end
     end
 end
@@ -49,8 +54,13 @@ function Editor.mousepressed(x, y)
         local gx = math.floor((x - hb.x) / Editor.cellSize)
         local gy = math.floor((y - hb.y) / Editor.cellSize)
         
-        Editor.paintMode = not Editor.drawGrid[gx][gy] -- If clicking empty, draw. If clicking filled, erase.
-        Editor.drawGrid[gx][gy] = Editor.paintMode
+        local current = Editor.drawGrid[gx][gy]
+        Editor.paintMode = not current
+        if Editor.paintMode then
+            Editor.drawGrid[gx][gy] = (Editor.explosionMode and "dynamite") or true
+        else
+            Editor.drawGrid[gx][gy] = false
+        end
         Editor.painting = true
         return true
     end
@@ -135,7 +145,14 @@ function Editor.draw()
         for gy = 0, 2 do
             local bx = Editor.offsetX + (gx * Editor.cellSize)
             local by = currentY + (gy * Editor.cellSize)
-            love.graphics.setColor(Editor.drawGrid[gx][gy] and {0.4, 1, 0.4} or {0.2, 0.2, 0.2})
+            local cell = Editor.drawGrid[gx][gy]
+            if cell == "dynamite" then
+                love.graphics.setColor(1, 0.55, 0, 1)
+            elseif cell then
+                love.graphics.setColor(0.4, 1, 0.4)
+            else
+                love.graphics.setColor(0.2, 0.2, 0.2)
+            end
             love.graphics.rectangle("fill", bx, by, Editor.cellSize-2, Editor.cellSize-2)
             love.graphics.setColor(0.5, 0.5, 0.5)
             love.graphics.rectangle("line", bx, by, Editor.cellSize-2, Editor.cellSize-2)
@@ -183,6 +200,10 @@ function Editor.draw()
     love.graphics.setColor(1, 1, 1)
     love.graphics.print("BLOCK", Editor.offsetX + 15, currentY + 8)
     love.graphics.print("CRUSHER", Editor.offsetX + 100, currentY + 8)
+
+    -- Explosion mode indicator
+    love.graphics.setColor(Editor.explosionMode and {1, 0.3, 0.3} or {0.7, 0.7, 0.7})
+    love.graphics.print("DYNAMITE: " .. (Editor.explosionMode and "ON" or "OFF"), Editor.offsetX + 190, currentY + 8)
     currentY = currentY + 30 + spacing
 
     -- Eraser
@@ -219,7 +240,10 @@ function Editor.getCurrentSegments()
     local segments = {}
     for x = 0, 2 do
         for y = 0, 2 do
-            if Editor.drawGrid[x][y] then table.insert(segments, {x = x, y = y}) end
+            local c = Editor.drawGrid[x][y]
+            if c then
+                table.insert(segments, {x = x, y = y, isDynamite = (c == "dynamite")})
+            end
         end
     end
     return segments

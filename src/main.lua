@@ -7,6 +7,62 @@ local StepTracker = require("stepTracker")
 
 local directionImg = love.graphics.newImage("Direction.png")
 
+local dynamiteImg, triggerImg
+pcall(function()
+    dynamiteImg = love.graphics.newImage("dynamite.png")
+end)
+pcall(function()
+    triggerImg = love.graphics.newImage("trigger.png")
+end)
+
+local function triggerCrusherAt(c)
+    -- Only trigger once
+    if not c.isTrigger or c.triggered then return false end
+    c.triggered = true
+    c.isTrigger = false -- disable trigger visual afterward
+
+    local gx, gy = c.gridX, c.gridY
+    -- Determine ray direction based on border position
+    local dx, dy = 0, 0
+    if gx == 0 then dx = 1 elseif gx == GameManager.grid.cols - 1 then dx = -1
+    elseif gy == 0 then dy = 1 elseif gy == GameManager.grid.rows - 1 then dy = -1 end
+
+    if dx == 0 and dy == 0 then return false end
+
+    local destroyed = false
+
+    -- No raycast: find first block with dynamite and clear all its dynamite cubes.
+    for bi = #GameManager.blocks, 1, -1 do
+        local b = GameManager.blocks[bi]
+        local hasDynamite = false
+        for _, s in ipairs(b.segments) do
+            if s.isDynamite then
+                hasDynamite = true
+                break
+            end
+        end
+
+        if hasDynamite then
+            for si = #b.segments, 1, -1 do
+                if b.segments[si].isDynamite then
+                    table.remove(b.segments, si)
+                    destroyed = true
+                end
+            end
+            if #b.segments == 0 then
+                table.remove(GameManager.blocks, bi)
+            end
+            break -- only one block per trigger click
+        end
+    end
+
+    if destroyed then
+        print("Trigger crusher activated at (" .. gx .. ", " .. gy .. "): destroyed dynamite cubes")
+    else
+        print("Trigger crusher activated at (" .. gx .. ", " .. gy .. "): no dynamite in path")
+    end
+end
+
 local dragStart = { x = 0, y = 0, active = false, idx = nil }
 local dragDirection = nil 
 local margin = { x = 60, y = 60 }
@@ -105,6 +161,13 @@ function love.keypressed(key, scancode, isrepeat)
         previousEditorMode = "block"
         Editor.eraserMode = false
     end
+    -- Toggle explosion / dynamite paint mode
+    if key == 'o' then
+        Editor.explosionMode = not Editor.explosionMode
+        print("Explosion mode: " .. tostring(Editor.explosionMode))
+        return
+    end
+
     -- Number keys for color selection (1-6):
     local num = tonumber(key)
     if num and num >= 1 and num <= #Editor.palette then
@@ -275,6 +338,14 @@ function love.mousepressed(x, y, button)
         return
     end
 
+        -- 2.5. Trigger existing crusher if clicked (only triggers if isTrigger=true and not already triggered)
+        for _, c in ipairs(GameManager.crushers) do
+            if c.gridX == gx and c.gridY == gy and c.isTrigger and not c.triggered then
+                triggerCrusherAt(c)
+                return
+            end
+        end
+
         -- 3. CRUSHER PAINTING: If Editor mode is set to crusher, enable painting
         if Editor.mode == "crusher" then
             Editor.painting = true
@@ -292,22 +363,24 @@ function love.mousepressed(x, y, button)
                     if StepTracker.active then
                         local color1 = Editor.selectedColors[1]
                         local color2 = Editor.selectedColors[2]
+                        local isTrigger = Editor.explosionMode
                         StepTracker.recordStep({
                             type = "add_crusher",
-                            gx = gx, gy = gy, color1 = color1, color2 = color2,
+                            gx = gx, gy = gy, color1 = color1, color2 = color2, isTrigger = isTrigger,
                             apply = function(state)
                                 if color2 then
-                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1], Editor.palette[color2]))
+                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1], Editor.palette[color2], isTrigger))
                                 else
-                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1]))
+                                    table.insert(state.crushers, Crusher.new(gx, gy, Editor.palette[color1], nil, isTrigger))
                                 end
                             end
                         })
                     end
+                    local isTrigger = Editor.explosionMode
                     if #Editor.selectedColors == 1 then
-                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]]))
+                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]], nil, isTrigger))
                     elseif #Editor.selectedColors >= 2 then
-                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]], Editor.palette[Editor.selectedColors[2]]))
+                        table.insert(GameManager.crushers, Crusher.new(gx, gy, Editor.palette[Editor.selectedColors[1]], Editor.palette[Editor.selectedColors[2]], isTrigger))
                     end
                 end
             end
@@ -553,7 +626,30 @@ function love.draw()
             love.graphics.rectangle("line", c * cellSize, r * cellSize, cellSize, cellSize)
         end
     end
-    for _, c in ipairs(GameManager.crushers) do Crusher.draw(c, cellSize) end
+    for _, c in ipairs(GameManager.crushers) do
+        Crusher.draw(c, cellSize)
+        if c.isTrigger then
+            local cx = c.gridX * cellSize
+            local cy = c.gridY * cellSize
+            if triggerImg then
+                local scale = (cellSize * 0.55) / math.max(triggerImg:getWidth(), triggerImg:getHeight())
+                local shadowScale = scale * 1.15
+                love.graphics.setColor(1, 1, 1, 0.5)
+                love.graphics.draw(triggerImg, cx + cellSize/2, cy + cellSize/2 + 1, 0, shadowScale, shadowScale, triggerImg:getWidth()/2, triggerImg:getHeight()/2)
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.draw(triggerImg, cx + cellSize/2, cy + cellSize/2, 0, scale, scale, triggerImg:getWidth()/2, triggerImg:getHeight()/2)
+            else
+                love.graphics.setColor(1, 1, 1, 0.9)
+                love.graphics.setLineWidth(3)
+                love.graphics.rectangle("line", cx + 2, cy + 2, cellSize - 4, cellSize - 4)
+                love.graphics.setLineWidth(1)
+                love.graphics.setColor(1, 0.4, 0.4, 0.85)
+                love.graphics.circle("fill", cx + cellSize/2, cy + cellSize/2, cellSize*0.2)
+                love.graphics.setColor(1, 1, 1, 1)
+                love.graphics.printf("T", cx, cy + cellSize*0.35, cellSize, "center")
+            end
+        end
+    end
     love.graphics.pop()
 
     for _, b in ipairs(GameManager.blocks) do
@@ -561,7 +657,27 @@ function love.draw()
         love.graphics.setColor(b.color[1], b.color[2], b.color[3], alpha)
         for _, s in ipairs(b.segments) do
             local drawX, drawY = b.viewX + s.x * cellSize, b.viewY + s.y * cellSize
+            love.graphics.setColor(b.color[1], b.color[2], b.color[3], alpha)
             love.graphics.rectangle("fill", drawX + 4, drawY + 4, cellSize - 8, cellSize - 8)
+            if s.isDynamite then
+                if dynamiteImg then
+                    local scale = (cellSize * 0.55) / math.max(dynamiteImg:getWidth(), dynamiteImg:getHeight())
+                    local shadowScale = scale * 1.15
+                    love.graphics.setColor(1, 1, 1, 0.5)
+                    love.graphics.draw(dynamiteImg, drawX + cellSize/2, drawY + cellSize/2 + 1, 0, shadowScale, shadowScale, dynamiteImg:getWidth()/2, dynamiteImg:getHeight()/2)
+                    love.graphics.setColor(1, 1, 1, 1)
+                    love.graphics.draw(dynamiteImg, drawX + cellSize/2, drawY + cellSize/2, 0, scale, scale, dynamiteImg:getWidth()/2, dynamiteImg:getHeight()/2)
+                else
+                    love.graphics.setColor(1, 1, 1, 0.95)
+                    love.graphics.setLineWidth(2)
+                    love.graphics.rectangle("line", drawX + 1, drawY + 1, cellSize - 2, cellSize - 2)
+                    love.graphics.setLineWidth(1)
+                    love.graphics.setColor(1, 0.4, 0, 1)
+                    love.graphics.rectangle("fill", drawX + cellSize*0.25, drawY + cellSize*0.25, cellSize*0.5, cellSize*0.5)
+                    love.graphics.setColor(1,1,1,1)
+                    love.graphics.printf("D", drawX, drawY + cellSize*0.3, cellSize, "center")
+                end
+            end
             if b.isStatic then
                 love.graphics.setColor(1, 0, 0, 1)
                 love.graphics.setLineWidth(2)
