@@ -1,16 +1,17 @@
 local Block = {}
 
-function Block.new(gx, gy, segments, color, moveAxis, cellSize)
+function Block.new(gx, gy, segments, color, moveAxis, cellSize, isStatic)
     return {
         gridX = gx,
         gridY = gy,
-        segments = segments, -- List of {x, y}
+        segments = segments,
         color = color,
-        moveAxis = moveAxis or "both", -- "horizontal", "vertical", "both"
+        moveAxis = moveAxis or "both",
         viewX = gx * cellSize,
         viewY = gy * cellSize,
         lerpSpeed = 18,
-        isCrushed = false
+        isCrushed = false,
+        isStatic = isStatic or false
     }
 end
 

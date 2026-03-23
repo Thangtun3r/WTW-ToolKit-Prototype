@@ -14,8 +14,16 @@ local margin = { x = 60, y = 60 }
 
 function love.load()
     love.window.setMode(1000, 700)
+    love.window.setTitle("Color Bloks 2D")
     Editor.load()
     Editor.offsetX = 650
+
+    -- Start tracking operations automatically so Ctrl+Z/Ctrl+Y will undo/redo edits directly.
+    StepTracker.start({
+        blocks = GameManager.blocks,
+        crushers = GameManager.crushers,
+        editor = Editor,
+    })
 end
 
 
@@ -28,7 +36,8 @@ local lastStepKey = ""
 function love.keypressed(key, scancode, isrepeat)
     -- Track last step key for indicator
     if key == 'f5' then lastStepKey = 'F5 (Start Tracking)' end
-    if key == 'f6' then lastStepKey = 'F6 (Stop/Revert)' end
+    if key == 'f6' then lastStepKey = 'F6 (Revert Snapshot)' end
+    if key == 'f7' then lastStepKey = 'F7 (Save Snapshot)' end
     if key == 'z' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Z (Undo)' end
     if key == 'y' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Y (Redo)' end
     -- StepTracker controls
@@ -40,15 +49,22 @@ function love.keypressed(key, scancode, isrepeat)
         })
         print("Step tracking started")
         return
-    elseif key == 'f6' then -- Stop tracking and revert
-        local state = StepTracker.revert()
+    elseif key == 'f6' then -- Revert to snapshot
+        local state = StepTracker.revertToSnapshot() or StepTracker.revert()
         if state then
             GameManager.blocks = StepTracker.deepCopy(state.blocks)
             GameManager.crushers = StepTracker.deepCopy(state.crushers)
             -- Optionally restore editor state if needed
         end
-        StepTracker.stop()
-        print("Step tracking stopped and reverted")
+        print("Reverted to saved snapshot")
+        return
+    elseif key == 'f7' then -- Save snapshot
+        StepTracker.saveSnapshot({
+            blocks = GameManager.blocks,
+            crushers = GameManager.crushers,
+            editor = Editor,
+        })
+        print("Snapshot saved")
         return
     elseif key == 'z' and love.keyboard.isDown('lctrl','rctrl') then -- Undo
         if StepTracker.active then
@@ -107,6 +123,10 @@ function love.keypressed(key, scancode, isrepeat)
             for i = 1, #Editor.palette do
                 if pressedColorKeys[i] then table.insert(Editor.selectedColors, i) end
             end
+        end
+        -- If holding a block, update its color to the new selection
+        if Editor.isPlacing and Editor.heldBlock then
+            Editor.heldBlock.color = Editor.getSelectedColor()
         end
         return
     end
@@ -188,12 +208,14 @@ function love.mousepressed(x, y, button)
             local segs = Editor.getCurrentSegments()
             if #segs > 0 then
                 Editor.isPlacing = true
+                local isStatic = (Editor.selectedAxis == "static")
                 Editor.heldBlock = {
                     segments = segs,
                     gridX = 0, gridY = 0,
                     viewX = 0, viewY = 0,
-                    color = Editor.getSelectedColor(),
-                    moveAxis = Editor.selectedAxis
+                    color = isStatic and {1,1,1} or Editor.getSelectedColor(),
+                    moveAxis = isStatic and "none" or Editor.selectedAxis,
+                    isStatic = isStatic
                 }
             end
         end
@@ -312,9 +334,9 @@ function love.mousepressed(x, y, button)
                 if StepTracker.active then
                     StepTracker.recordStep({
                         type = "add_block",
-                        gx = gx, gy = gy, segments = b.segments, color = b.color, moveAxis = b.moveAxis,
+                        gx = gx, gy = gy, segments = b.segments, color = b.color, moveAxis = b.moveAxis, isStatic = b.isStatic,
                         apply = function(state)
-                            local block = Block.new(gx, gy, b.segments, b.color, b.moveAxis, GameManager.grid.cellSize)
+                            local block = Block.new(gx, gy, b.segments, b.color, b.moveAxis, GameManager.grid.cellSize, b.isStatic)
                             block.viewX = margin.x + gx * GameManager.grid.cellSize
                             block.viewY = margin.y + gy * GameManager.grid.cellSize
                             table.insert(state.blocks, block)
@@ -330,13 +352,15 @@ function love.mousepressed(x, y, button)
 
         -- 5. BLOCK DRAGGING: Logic for moving existing blocks on the board
         for i, b in ipairs(GameManager.blocks) do
-            for _, s in ipairs(b.segments) do
-                local sx = margin.x + (b.gridX + s.x) * GameManager.grid.cellSize
-                local sy = margin.y + (b.gridY + s.y) * GameManager.grid.cellSize
-                if x >= sx and x <= sx + GameManager.grid.cellSize and 
-                   y >= sy and y <= sy + GameManager.grid.cellSize then
-                    dragStart = {x = x, y = y, active = true, idx = i}
-                    return
+            if not b.isStatic then
+                for _, s in ipairs(b.segments) do
+                    local sx = margin.x + (b.gridX + s.x) * GameManager.grid.cellSize
+                    local sy = margin.y + (b.gridY + s.y) * GameManager.grid.cellSize
+                    if x >= sx and x <= sx + GameManager.grid.cellSize and 
+                       y >= sy and y <= sy + GameManager.grid.cellSize then
+                        dragStart = {x = x, y = y, active = true, idx = i}
+                        return
+                    end
                 end
             end
         end
@@ -510,6 +534,14 @@ function love.draw()
     if lastStepKey ~= "" then
         love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
     end
+
+    -- Shortcut help HUD in bottom-right
+    local winW, winH = love.graphics.getWidth(), love.graphics.getHeight()
+    local helpY = winH - 40
+    love.graphics.printf("F5: Start Tracking  F7: Save Snapshot  F6: Revert Snapshot", 0, helpY, winW - 10, "right")
+    love.graphics.printf("Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 20, winW - 10, "right")
+
+
     local cellSize = GameManager.grid.cellSize
 
     love.graphics.push()
@@ -525,12 +557,21 @@ function love.draw()
     love.graphics.pop()
 
     for _, b in ipairs(GameManager.blocks) do
-        love.graphics.setColor(b.color[1], b.color[2], b.color[3], 1)
+        local alpha = b.isStatic and 0.8 or 1
+        love.graphics.setColor(b.color[1], b.color[2], b.color[3], alpha)
         for _, s in ipairs(b.segments) do
             local drawX, drawY = b.viewX + s.x * cellSize, b.viewY + s.y * cellSize
             love.graphics.rectangle("fill", drawX + 4, drawY + 4, cellSize - 8, cellSize - 8)
+            if b.isStatic then
+                love.graphics.setColor(1, 0, 0, 1)
+                love.graphics.setLineWidth(2)
+                love.graphics.line(drawX + 6, drawY + 6, drawX + cellSize - 6, drawY + cellSize - 6)
+                love.graphics.line(drawX + 6, drawY + cellSize - 6, drawX + cellSize - 6, drawY + 6)
+                love.graphics.setLineWidth(1)
+            end
         end
-        if #b.segments > 0 then
+
+        if not b.isStatic and #b.segments > 0 then
             local s = b.segments[1]
             local drawX, drawY = b.viewX + s.x * cellSize, b.viewY + s.y * cellSize
             local rot = (b.moveAxis == "horizontal") and math.pi/2 or 0

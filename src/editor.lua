@@ -15,7 +15,7 @@ local Editor = {
     heldBlock = nil,
     painting = false,
     paintMode = true, -- true = draw, false = erase
-    directionOptions = {"horizontal", "vertical"},
+    directionOptions = {"horizontal", "vertical", "static"},
     selectedDirectionIdx = 2,
     directionDropdownOpen = false,
     eraserMode = false,
@@ -92,10 +92,10 @@ function Editor.mousepressed(x, y)
     -- 5. Modes
     local mb = Editor.hitboxes.modes
     if mb and y >= mb.y and y <= mb.y + mb.h then
-        if x >= mb.x and x <= mb.x + 80 then 
-            Editor.mode = "block"; Editor.eraserMode = false; return true 
-        elseif x >= mb.x + 90 and x <= mb.x + 170 then 
-            Editor.mode = "crusher"; Editor.eraserMode = false; return true 
+        if x >= mb.x and x <= mb.x + 80 then
+            Editor.mode = "block"; Editor.eraserMode = false; return true
+        elseif x >= mb.x + 90 and x <= mb.x + 170 then
+            Editor.mode = "crusher"; Editor.eraserMode = false; return true
         end
     end
 
@@ -175,7 +175,7 @@ function Editor.draw()
     currentY = currentY + 35 + spacing
 
     -- Modes
-    Editor.hitboxes.modes = {x = Editor.offsetX, y = currentY, w = 170, h = 30}
+    Editor.hitboxes.modes = {x = Editor.offsetX, y = currentY, w = 260, h = 30}
     love.graphics.setColor(Editor.mode == "block" and {0.2, 0.8, 0.2} or {0.4, 0.4, 0.4})
     love.graphics.rectangle("fill", Editor.offsetX, currentY, 80, 30)
     love.graphics.setColor(Editor.mode == "crusher" and {0.8, 0.2, 0.2} or {0.4, 0.4, 0.4})

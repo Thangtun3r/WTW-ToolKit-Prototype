@@ -1,12 +1,13 @@
 local Crusher = {}
 
-function Crusher.new(gx, gy, color, dualColor)
+function Crusher.new(gx, gy, color, dualColor, isTrigger)
     return {
         gridX = gx,
         gridY = gy,
         color = color,
         dualColor = dualColor or nil,  -- Optional second color for dual-color crushers
-        isMulti = dualColor ~= nil
+        isMulti = dualColor ~= nil,
+        isTrigger = isTrigger or false
     }
 end
 
