@@ -15,6 +15,10 @@ pcall(function()
     triggerImg = love.graphics.newImage("trigger.png")
 end)
 
+local margin = { x = 60, y = 60 }
+local dragMode = nil -- "slide" or "free"
+local dragStartTime = 0
+
 local function triggerCrusherAt(c)
     -- Only trigger once
     if not c.isTrigger or c.triggered then return false end
@@ -64,8 +68,9 @@ local function triggerCrusherAt(c)
 end
 
 local dragStart = { x = 0, y = 0, active = false, idx = nil }
-local dragDirection = nil 
-local margin = { x = 60, y = 60 }
+local dragDirection = nil
+local dragMode = nil -- "slide" or "free"
+local dragStartTime = 0
 
 
 function love.load()
@@ -432,6 +437,9 @@ function love.mousepressed(x, y, button)
                     if x >= sx and x <= sx + GameManager.grid.cellSize and 
                        y >= sy and y <= sy + GameManager.grid.cellSize then
                         dragStart = {x = x, y = y, active = true, idx = i}
+                        dragDirection = nil
+                        dragMode = nil
+                        dragStartTime = love.timer.getTime()
                         return
                     end
                 end
@@ -439,7 +447,32 @@ function love.mousepressed(x, y, button)
         end
     end
 function love.mousemoved(x, y, dx, dy)
-    -- Paint erase while dragging with right mouse button (button 2), even if not in painting mode
+    -- If user clicked a block and is in drag context, choose mode on hold/time or slide motion
+    if dragStart.active and dragStart.idx then
+        local diffX = math.abs(x - dragStart.x)
+        local diffY = math.abs(y - dragStart.y)
+        if not dragMode then
+            if love.timer.getTime() - dragStartTime > 0.2 then
+                dragMode = "free"
+            elseif diffX > 10 or diffY > 10 then
+                dragMode = "slide"
+            end
+        end
+
+        if dragMode == "free" then
+            local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
+            local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
+            if gx >= 0 and gx <= GameManager.grid.cols - 1 and gy >= 0 and gy <= GameManager.grid.rows - 1 then
+                local b = GameManager.blocks[dragStart.idx]
+                if b and not b.isStatic and GameManager.canBlockFit(dragStart.idx, gx, gy) then
+                    b.gridX = gx
+                    b.gridY = gy
+                end
+            end
+            return
+        end
+    end
+
     if love.mouse.isDown(2) then
         local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
         local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
@@ -515,7 +548,7 @@ function love.mousemoved(x, y, dx, dy)
         return
     end
 
-    if dragStart.active and dragStart.idx and not dragDirection then
+    if dragMode == "slide" and dragStart.active and dragStart.idx and not dragDirection then
         local diffX = math.abs(x - dragStart.x)
         local diffY = math.abs(y - dragStart.y)
         if diffX > 10 or diffY > 10 then
@@ -530,7 +563,7 @@ end
 
 function love.mousereleased(x, y, button)
     if button == 1 then
-        if dragStart.active and dragStart.idx and dragDirection then
+        if dragMode == "slide" and dragStart.active and dragStart.idx and dragDirection then
             local b = GameManager.blocks[dragStart.idx]
             if b then
                 local oldX, oldY = b.gridX, b.gridY
@@ -582,6 +615,8 @@ function love.mousereleased(x, y, button)
 
         dragStart = { x = 0, y = 0, active = false, idx = nil }
         dragDirection = nil
+        dragMode = nil
+        dragStartTime = 0
 
         if Editor.painting then
             Editor.painting = false
