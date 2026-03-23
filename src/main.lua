@@ -520,7 +520,9 @@ function love.draw()
             local rot = (b.moveAxis == "horizontal") and math.pi/2 or 0
             love.graphics.setColor(1,1,1,0.6)
             local scale = (cellSize - 20) / directionImg:getWidth()
+            love.graphics.setBlendMode("subtract")
             love.graphics.draw(directionImg, drawX + cellSize/2, drawY + cellSize/2, rot, scale, scale, directionImg:getWidth()/2, directionImg:getHeight()/2)
+            love.graphics.setBlendMode("alpha")
         end
     end
 
