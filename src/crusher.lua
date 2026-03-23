@@ -22,11 +22,14 @@ function Crusher.draw(c, cellSize)
     end
     local sat = 0.1 -- 0 = full gray, 1 = original color
     local alpha = 0.8
+    -- Shrink by 10% and center
+    local shrink = 0.10
+    local size = (cellSize - 4) * (1 - shrink)
+    local offset = ((cellSize - 4) - size) / 2
+    local x = c.gridX * cellSize + 2 + offset
+    local y = c.gridY * cellSize + 2 + offset
     if c.isMulti and c.dualColor then
         -- Diagonal split for dual-color crushers
-        local x = c.gridX * cellSize + 2
-        local y = c.gridY * cellSize + 2
-        local size = cellSize - 4
         -- First triangle (top-left to bottom-right)
         local col1 = desaturate(c.color, sat)
         love.graphics.setColor(col1[1], col1[2], col1[3], alpha)
@@ -39,7 +42,7 @@ function Crusher.draw(c, cellSize)
         -- Single color crusher
         local col = desaturate(c.color, sat)
         love.graphics.setColor(col[1], col[2], col[3], alpha)
-        love.graphics.rectangle("fill", c.gridX * cellSize + 2, c.gridY * cellSize + 2, cellSize - 4, cellSize - 4)
+        love.graphics.rectangle("fill", x, y, size, size)
     end
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.rectangle("line", c.gridX * cellSize, c.gridY * cellSize, cellSize, cellSize)
