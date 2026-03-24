@@ -1,6 +1,7 @@
 
 local Editor = require("editor")
 local GameManager = require("gameManager")
+_G.GameManager = GameManager
 local Block = require("block")
 local Crusher = require("crusher")
 local StepTracker = require("stepTracker")
@@ -14,10 +15,6 @@ end)
 pcall(function()
     triggerImg = love.graphics.newImage("trigger.png")
 end)
-
-local margin = { x = 60, y = 60 }
-local dragMode = nil -- "slide" or "free"
-local dragStartTime = 0
 
 local function triggerCrusherAt(c)
     -- Only trigger once
@@ -67,10 +64,203 @@ local function triggerCrusherAt(c)
     end
 end
 
+-- Level save/load helpers
+local LevelManager = {
+    files = {},
+    selectedIndex = 1,
+}
+
+local LevelSelectUI = {
+    x = 10,
+    y = 50,
+    w = 400,
+    rowHeight = 20,
+    maxRows = 8,
+    isOpen = false,
+    buttonHeight = 26,
+    buttonWidth = 420,
+    deleteButtonHeight = 26,
+    deleteButtonWidth = 100,
+}
+
+local function serializeValue(value, indent)
+    indent = indent or ""
+    local t = type(value)
+    if t == "number" or t == "boolean" then
+        return tostring(value)
+    elseif t == "string" then
+        return string.format("%q", value)
+    elseif t == "table" then
+        local isArray = true
+        local maxIndex = 0
+        for k, _ in pairs(value) do
+            if type(k) ~= "number" then
+                isArray = false
+                break
+            end
+            maxIndex = math.max(maxIndex, k)
+        end
+        local parts = {}
+        local nextIndent = indent .. "  "
+        if isArray then
+            for i = 1, maxIndex do
+                table.insert(parts, nextIndent .. serializeValue(value[i], nextIndent))
+            end
+            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+        else
+            for k, v in pairs(value) do
+                local keypart = (type(k) == "string" and k:match("^%a[%w_]*$") and k or "[" .. serializeValue(k) .. "]")
+                table.insert(parts, nextIndent .. keypart .. " = " .. serializeValue(v, nextIndent))
+            end
+            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+        end
+    else
+        return "nil"
+    end
+end
+
+local function updateWindowTitleWithLevel()
+    local selectedFile = "(none)"
+    if #LevelManager.files > 0 and LevelManager.selectedIndex >= 1 and LevelManager.selectedIndex <= #LevelManager.files then
+        selectedFile = LevelManager.files[LevelManager.selectedIndex]
+    end
+    love.window.setTitle("Color Bloks 2D - " .. selectedFile)
+end
+
+local function refreshLevelFiles()
+    local items = love.filesystem.getDirectoryItems("")
+    LevelManager.files = {}
+    for _, file in ipairs(items) do
+        if file:match("^level_.*%.lvl$") then
+            table.insert(LevelManager.files, file)
+        end
+    end
+    table.sort(LevelManager.files)
+    if #LevelManager.files == 0 then
+        LevelManager.selectedIndex = 1
+    else
+        LevelManager.selectedIndex = math.min(LevelManager.selectedIndex, #LevelManager.files)
+    end
+    updateWindowTitleWithLevel()
+end
+
+local function updateWindowTitleWithLevel()
+    local selectedFile = "(none)"
+    if #LevelManager.files > 0 and LevelManager.selectedIndex >= 1 and LevelManager.selectedIndex <= #LevelManager.files then
+        selectedFile = LevelManager.files[LevelManager.selectedIndex]
+    end
+    love.window.setTitle("Color Bloks 2D - " .. selectedFile)
+end
+
+local function getNextLevelNumber()
+    local maxNum = 0
+    for _, file in ipairs(LevelManager.files) do
+        local num = tonumber(file:match("^level_(%d+)%.lvl$"))
+        if num and num > maxNum then
+            maxNum = num
+        end
+    end
+    return maxNum + 1
+end
+
+local function saveLevelAs(fileName)
+    local snapshot = {
+        grid = GameManager.grid,
+        crushers = GameManager.crushers,
+        blocks = GameManager.blocks,
+    }
+    local content = "return " .. serializeValue(snapshot)
+    local ok, err = love.filesystem.write(fileName, content)
+    if not ok then
+        print("[Save] Failed to save level to " .. fileName .. ": " .. tostring(err))
+        return false
+    end
+    print("[Save] Level saved to " .. fileName)
+    refreshLevelFiles()
+    return true
+end
+
+local function saveLevel()
+    refreshLevelFiles()
+    local nextNum = getNextLevelNumber()
+    local fileName = string.format("level_%d.lvl", nextNum)
+    return saveLevelAs(fileName)
+end
+
+local function applyLoadedLevel(levelData)
+    if not levelData or type(levelData) ~= "table" then
+        print("[Load] invalid level data")
+        return false
+    end
+    if levelData.grid then
+        GameManager.grid = levelData.grid
+    end
+
+    GameManager.crushers = {}
+    for _, c in ipairs(levelData.crushers or {}) do
+        table.insert(GameManager.crushers, Crusher.new(c.gridX or 0, c.gridY or 0, c.color or {1,1,1}, c.dualColor, c.isTrigger))
+    end
+
+    GameManager.blocks = {}
+    for _, b in ipairs(levelData.blocks or {}) do
+        local block = Block.new(b.gridX or 0, b.gridY or 0, b.segments or {}, b.color or {1,1,1}, b.moveAxis or "both", GameManager.grid.cellSize, b.isStatic)
+        block.viewX = (b.viewX or (margin.x + (b.gridX or 0) * GameManager.grid.cellSize))
+        block.viewY = (b.viewY or (margin.y + (b.gridY or 0) * GameManager.grid.cellSize))
+        table.insert(GameManager.blocks, block)
+    end
+
+    print("[Load] Level loaded")
+    return true
+end
+
+local function loadLevel(fileName)
+    if not love.filesystem.getInfo(fileName) then
+        print("[Load] level file not found: " .. tostring(fileName))
+        return false
+    end
+    local content, err = love.filesystem.read(fileName)
+    if not content then
+        print("[Load] can't read level file: " .. tostring(err))
+        return false
+    end
+    local chunk, err2 = loadstring(content)
+    if not chunk then
+        print("[Load] invalid level file format: " .. tostring(err2))
+        return false
+    end
+    local ok, data = pcall(chunk)
+    if not ok then
+        print("[Load] error executing level file: " .. tostring(data))
+        return false
+    end
+    return applyLoadedLevel(data)
+end
+
+local function selectNextLevel()
+    if #LevelManager.files == 0 then
+        print("[Load] no saved levels available")
+        return
+    end
+    LevelManager.selectedIndex = LevelManager.selectedIndex % #LevelManager.files + 1
+    print("[Load] selected level " .. LevelManager.selectedIndex .. ": " .. LevelManager.files[LevelManager.selectedIndex])
+    updateWindowTitleWithLevel()
+end
+
+local function loadSelectedLevel()
+    if #LevelManager.files == 0 then
+        print("[Load] no saved levels available")
+        return
+    end
+    local fileName = LevelManager.files[LevelManager.selectedIndex]
+    loadLevel(fileName)
+end
+
 local dragStart = { x = 0, y = 0, active = false, idx = nil }
 local dragDirection = nil
-local dragMode = nil -- "slide" or "free"
-local dragStartTime = 0
+local dragMode = nil
+local margin = { x = 60, y = 60 }
+local focusMode = false
+local normalWindow = { w = 1000, h = 700 }
 
 
 function love.load()
@@ -78,6 +268,10 @@ function love.load()
     love.window.setTitle("Color Bloks 2D")
     Editor.load()
     Editor.offsetX = 650
+
+    -- Load saved level list from disk
+    refreshLevelFiles()
+    updateWindowTitleWithLevel()
 
     -- Start tracking operations automatically so Ctrl+Z/Ctrl+Y will undo/redo edits directly.
     StepTracker.start({
@@ -99,6 +293,11 @@ function love.keypressed(key, scancode, isrepeat)
     if key == 'f5' then lastStepKey = 'F5 (Start Tracking)' end
     if key == 'f6' then lastStepKey = 'F6 (Revert Snapshot)' end
     if key == 'f7' then lastStepKey = 'F7 (Save Snapshot)' end
+    if key == 'f8' then lastStepKey = 'F8 (Save Level)' end
+    if key == 'f9' then lastStepKey = 'F9 (Select Next Saved Level)' end
+    if key == 'f10' then lastStepKey = 'F10 (Load Selected Level)' end
+    if key == 'l' then lastStepKey = 'L (Refresh Level List)' end
+    if key == 's' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+S (Save Selected Level)' end
     if key == 'z' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Z (Undo)' end
     if key == 'y' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Y (Redo)' end
     -- StepTracker controls
@@ -126,6 +325,43 @@ function love.keypressed(key, scancode, isrepeat)
             editor = Editor,
         })
         print("Snapshot saved")
+        return
+    elseif key == 'f8' then -- Save level to file
+        saveLevel()
+        return
+    elseif key == 'f9' then -- Select next saved level file
+        selectNextLevel()
+        return
+    elseif key == 'f10' then -- Load selected saved level file
+        loadSelectedLevel()
+        return
+    elseif key == 'f12' then -- Focus mode toggle
+        focusMode = not focusMode
+        if focusMode then
+            LevelSelectUI.isOpen = false
+            local gw = GameManager.grid.cols * GameManager.grid.cellSize + margin.x * 2
+            local gh = GameManager.grid.rows * GameManager.grid.cellSize + margin.y * 2
+            love.window.setMode(gw, gh)
+        else
+            love.window.setMode(normalWindow.w, normalWindow.h)
+        end
+        print("Focus mode: " .. tostring(focusMode))
+        return
+    elseif key == 'l' then -- Refresh saved level list
+        refreshLevelFiles()
+        print("[Load] available saved levels:")
+        for i, fileName in ipairs(LevelManager.files) do
+            local selected = (i == LevelManager.selectedIndex) and "*" or " "
+            print(string.format("%s %d. %s", selected, i, fileName))
+        end
+        return
+    elseif key == 's' and love.keyboard.isDown('lctrl','rctrl') then -- Save selected level (or new)
+        local selectedName = LevelManager.files[LevelManager.selectedIndex]
+        if selectedName then
+            saveLevelAs(selectedName)
+        else
+            saveLevel()
+        end
         return
     elseif key == 'z' and love.keyboard.isDown('lctrl','rctrl') then -- Undo
         if StepTracker.active then
@@ -269,6 +505,72 @@ function love.update(dt)
 end
 
 function love.mousepressed(x, y, button)
+    -- 0. Saved-level dropdown
+    if focusMode then
+        LevelSelectUI.isOpen = false
+    else
+        local renderX = love.graphics.getWidth() - LevelSelectUI.buttonWidth - 10
+        local renderY = love.graphics.getHeight() - 140
+        local buttonX1, buttonY1 = renderX, renderY
+        local buttonX2, buttonY2 = renderX + LevelSelectUI.buttonWidth, renderY + LevelSelectUI.buttonHeight
+
+        if button == 1 and x >= buttonX1 and x <= buttonX2 and y >= buttonY1 and y <= buttonY2 then
+            LevelSelectUI.isOpen = not LevelSelectUI.isOpen
+            return
+        end
+
+        if LevelSelectUI.isOpen then
+            local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+            local listTop = renderY + LevelSelectUI.buttonHeight
+            local listBottom = listTop + rows * LevelSelectUI.rowHeight
+
+        if button == 1 and x >= renderX and x <= renderX + LevelSelectUI.buttonWidth and y >= listTop and y <= listBottom then
+            local clickedRow = math.floor((y - listTop) / LevelSelectUI.rowHeight) + 1
+            if clickedRow >= 1 and clickedRow <= #LevelManager.files then
+                LevelManager.selectedIndex = clickedRow
+                updateWindowTitleWithLevel()
+                print("[Load] selected level " .. clickedRow .. ": " .. LevelManager.files[clickedRow])
+            end
+            LevelSelectUI.isOpen = false
+            return
+        end
+
+        -- right click delete is disabled in level dropdown; use Delete button
+        -- (keep this block removed to avoid accidental delete via right mouse button)
+
+
+        if button == 1 then
+            local deleteX = renderX + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
+            local deleteY = renderY + LevelSelectUI.buttonHeight + (math.min(#LevelManager.files, LevelSelectUI.maxRows) * LevelSelectUI.rowHeight) + 8
+            if x >= deleteX and x <= deleteX + LevelSelectUI.deleteButtonWidth and y >= deleteY and y <= deleteY + LevelSelectUI.deleteButtonHeight then
+                if #LevelManager.files > 0 then
+                    local fileToDelete = LevelManager.files[LevelManager.selectedIndex]
+                    if love.filesystem.getInfo(fileToDelete) then
+                        love.filesystem.remove(fileToDelete)
+                    end
+                    table.remove(LevelManager.files, LevelManager.selectedIndex)
+                    if LevelManager.selectedIndex > #LevelManager.files then
+                        LevelManager.selectedIndex = math.max(1, #LevelManager.files)
+                    end
+                    if #LevelManager.files == 0 then
+                        LevelManager.selectedIndex = 1
+                    end
+                    updateWindowTitleWithLevel()
+                    print("[Load] deleted selected level " .. tostring(fileToDelete))
+                end
+                LevelSelectUI.isOpen = false
+                return
+            end
+        end
+
+        -- Click outside to close
+        if button == 1 and not (x >= renderX and x <= renderX + LevelSelectUI.buttonWidth and y >= renderY and y <= listBottom + LevelSelectUI.deleteButtonHeight + 8) then
+            LevelSelectUI.isOpen = false
+            -- continue to game UI interactions
+        end
+    end
+    end
+
     -- 1. UI CHECK: Check if clicking the Sidebar Editor area
     if button == 1 and x > Editor.offsetX - 20 then
         local result = Editor.mousepressed(x, y)
@@ -436,10 +738,9 @@ function love.mousepressed(x, y, button)
                     local sy = margin.y + (b.gridY + s.y) * GameManager.grid.cellSize
                     if x >= sx and x <= sx + GameManager.grid.cellSize and 
                        y >= sy and y <= sy + GameManager.grid.cellSize then
-                        dragStart = {x = x, y = y, active = true, idx = i}
+                        dragStart = {x = x, y = y, active = true, idx = i, startGridX = b.gridX, startGridY = b.gridY, pressTime = love.timer.getTime()}
+                        dragMode = "undetermined"
                         dragDirection = nil
-                        dragMode = nil
-                        dragStartTime = love.timer.getTime()
                         return
                     end
                 end
@@ -447,32 +748,7 @@ function love.mousepressed(x, y, button)
         end
     end
 function love.mousemoved(x, y, dx, dy)
-    -- If user clicked a block and is in drag context, choose mode on hold/time or slide motion
-    if dragStart.active and dragStart.idx then
-        local diffX = math.abs(x - dragStart.x)
-        local diffY = math.abs(y - dragStart.y)
-        if not dragMode then
-            if love.timer.getTime() - dragStartTime > 0.2 then
-                dragMode = "free"
-            elseif diffX > 10 or diffY > 10 then
-                dragMode = "slide"
-            end
-        end
-
-        if dragMode == "free" then
-            local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
-            local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
-            if gx >= 0 and gx <= GameManager.grid.cols - 1 and gy >= 0 and gy <= GameManager.grid.rows - 1 then
-                local b = GameManager.blocks[dragStart.idx]
-                if b and not b.isStatic and GameManager.canBlockFit(dragStart.idx, gx, gy) then
-                    b.gridX = gx
-                    b.gridY = gy
-                end
-            end
-            return
-        end
-    end
-
+    -- Paint erase while dragging with right mouse button (button 2), even if not in painting mode
     if love.mouse.isDown(2) then
         local gx = math.floor((x - margin.x) / GameManager.grid.cellSize)
         local gy = math.floor((y - margin.y) / GameManager.grid.cellSize)
@@ -548,14 +824,43 @@ function love.mousemoved(x, y, dx, dy)
         return
     end
 
-    if dragMode == "slide" and dragStart.active and dragStart.idx and not dragDirection then
+    if dragStart.active and dragStart.idx then
         local diffX = math.abs(x - dragStart.x)
         local diffY = math.abs(y - dragStart.y)
-        if diffX > 10 or diffY > 10 then
-            if diffX > diffY then
-                dragDirection = "horizontal"
+        local elapsed = love.timer.getTime() - (dragStart.pressTime or 0)
+
+        if dragMode == "undetermined" and (diffX > 10 or diffY > 10) then
+            if elapsed >= 0.15 then
+                dragMode = "free"
             else
-                dragDirection = "vertical"
+                dragMode = "slide"
+            end
+        end
+
+        if dragMode == "free" then
+            local b = GameManager.blocks[dragStart.idx]
+            if b then
+                local mouseGridX = math.floor((x - margin.x) / GameManager.grid.cellSize)
+                local mouseGridY = math.floor((y - margin.y) / GameManager.grid.cellSize)
+                -- Keep inside bounds
+                mouseGridX = math.max(0, math.min(GameManager.grid.cols - 1, mouseGridX))
+                mouseGridY = math.max(0, math.min(GameManager.grid.rows - 1, mouseGridY))
+                -- Optional collision check:
+                if GameManager.canBlockFit(dragStart.idx, mouseGridX, mouseGridY) then
+                    b.gridX = mouseGridX
+                    b.gridY = mouseGridY
+                end
+            end
+            return
+        end
+
+        if dragMode ~= "free" and not dragDirection then
+            if diffX > 10 or diffY > 10 then
+                if diffX > diffY then
+                    dragDirection = "horizontal"
+                else
+                    dragDirection = "vertical"
+                end
             end
         end
     end
@@ -563,43 +868,47 @@ end
 
 function love.mousereleased(x, y, button)
     if button == 1 then
-        if dragMode == "slide" and dragStart.active and dragStart.idx and dragDirection then
+        if dragStart.active and dragStart.idx then
             local b = GameManager.blocks[dragStart.idx]
             if b then
-                local oldX, oldY = b.gridX, b.gridY
-                local gx, gy = b.gridX, b.gridY
-                local step = 0
-                local moved = false
-                if dragDirection == "horizontal" and (b.moveAxis == "horizontal" or b.moveAxis == "both") then
-                    step = (x > dragStart.x) and 1 or -1
-                    while true do
-                        local nextX = gx + step
-                        if not GameManager.canBlockFit(dragStart.idx, nextX, gy) then break end
-                        gx = nextX
-                        if gx <= 0 or gx >= GameManager.grid.cols - 1 then break end
+                local oldX, oldY = dragStart.startGridX, dragStart.startGridY
+                local toX, toY = b.gridX, b.gridY
+                local moved = (toX ~= oldX or toY ~= oldY)
+
+                if dragMode ~= "free" and dragDirection and b then
+                    local gx, gy = b.gridX, b.gridY
+                    local step = 0
+                    if dragDirection == "horizontal" and (b.moveAxis == "horizontal" or b.moveAxis == "both") then
+                        step = (x > dragStart.x) and 1 or -1
+                        while true do
+                            local nextX = gx + step
+                            if not GameManager.canBlockFit(dragStart.idx, nextX, gy) then break end
+                            gx = nextX
+                            if gx <= 0 or gx >= GameManager.grid.cols - 1 then break end
+                        end
+                        if gx ~= oldX then moved = true end
+                        b.gridX = gx
+                    elseif dragDirection == "vertical" and (b.moveAxis == "vertical" or b.moveAxis == "both") then
+                        step = (y > dragStart.y) and 1 or -1
+                        while true do
+                            local nextY = gy + step
+                            if not GameManager.canBlockFit(dragStart.idx, gx, nextY) then break end
+                            gy = nextY
+                            if gy <= 0 or gy >= GameManager.grid.rows - 1 then break end
+                        end
+                        if gy ~= oldY then moved = true end
+                        b.gridY = gy
                     end
-                    if gx ~= oldX then moved = true end
-                    b.gridX = gx
-                elseif dragDirection == "vertical" and (b.moveAxis == "vertical" or b.moveAxis == "both") then
-                    step = (y > dragStart.y) and 1 or -1
-                    while true do
-                        local nextY = gy + step
-                        if not GameManager.canBlockFit(dragStart.idx, gx, nextY) then break end
-                        gy = nextY
-                        if gy <= 0 or gy >= GameManager.grid.rows - 1 then break end
-                    end
-                    if gy ~= oldY then moved = true end
-                    b.gridY = gy
+                    toX, toY = b.gridX, b.gridY
                 end
+
                 -- Track block move as a step
                 if moved and StepTracker.active then
                     local idx = dragStart.idx
-                    local fromX, fromY = oldX, oldY
-                    local toX, toY = b.gridX, b.gridY
                     StepTracker.recordStep({
                         type = "move_block",
                         blockIdx = idx,
-                        fromX = fromX, fromY = fromY,
+                        fromX = oldX, fromY = oldY,
                         toX = toX, toY = toY,
                         apply = function(state)
                             local block = state.blocks[idx]
@@ -614,9 +923,8 @@ function love.mousereleased(x, y, button)
         end
 
         dragStart = { x = 0, y = 0, active = false, idx = nil }
-        dragDirection = nil
         dragMode = nil
-        dragStartTime = 0
+        dragDirection = nil
 
         if Editor.painting then
             Editor.painting = false
@@ -631,24 +939,86 @@ end
 
 function love.draw()
     -- Tracking indicator and step count with color
-    if StepTracker.active then
-        love.graphics.setColor(0, 1, 0, 1) -- Green for tracking
-    else
-        love.graphics.setColor(1, 0, 0, 1) -- Red for not tracking
-    end
-    local trackingText = StepTracker.active and ("[TRACKING]  Steps: " .. tostring(StepTracker.stepCount or 0)) or "[NOT TRACKING]"
-    love.graphics.print(trackingText, 10, 10)
-    love.graphics.setColor(1, 1, 1, 1)
-    if lastStepKey ~= "" then
-        love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
-    end
-
-    -- Shortcut help HUD in bottom-right
     local winW, winH = love.graphics.getWidth(), love.graphics.getHeight()
-    local helpY = winH - 40
-    love.graphics.printf("F5: Start Tracking  F7: Save Snapshot  F6: Revert Snapshot", 0, helpY, winW - 10, "right")
-    love.graphics.printf("Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 20, winW - 10, "right")
+    if not focusMode then
+        if StepTracker.active then
+            love.graphics.setColor(0, 1, 0, 1) -- Green for tracking
+        else
+            love.graphics.setColor(1, 0, 0, 1) -- Red for not tracking
+        end
+        local trackingText = StepTracker.active and ("[TRACKING]  Steps: " .. tostring(StepTracker.stepCount or 0)) or "[NOT TRACKING]"
+        love.graphics.print(trackingText, 10, 10)
+        love.graphics.setColor(1, 1, 1, 1)
+        if lastStepKey ~= "" then
+            love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
+        end
 
+        -- Shortcut help HUD in bottom-right
+        local helpY = winH - 60
+        love.graphics.printf("F5: Start Tracking  F6: Revert Snapshot  F7: Save Snapshot", 0, helpY, winW - 10, "right")
+        love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  F12: Toggle Focus", 0, helpY + 18, winW - 10, "right")
+        love.graphics.printf("Ctrl+S: Save Selected  Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 36, winW - 10, "right")
+    else
+        -- focus mode: minimal display (no dropdown/UI)
+        -- just keep grid+blocks drawing below
+        love.graphics.setColor(1, 1, 1, 1)
+        -- optionally could draw a small subtitle for mode but requirement says hide
+        -- love.graphics.printf("[FOCUS MODE]", 10, 10, winW - 20, "left")
+    end
+
+    -- drop the old footer "Selected Level" text to reduce left-corner clutter
+
+    if focusMode then
+        -- hide level dropdown UI in focus mode
+        LevelSelectUI.isOpen = false
+    else
+        -- Saved Level dropdown-style menu only in normal mode
+        LevelSelectUI.x = winW - LevelSelectUI.buttonWidth - 10
+        LevelSelectUI.y = winH - 140
+
+        -- Button line
+        local selectedFile = (#LevelManager.files > 0) and (LevelManager.files[LevelManager.selectedIndex] or "(none)") or "(none)"
+        love.graphics.setColor(0.15, 0.15, 0.15, 0.8)
+        love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
+        love.graphics.print("Level: " .. selectedFile, LevelSelectUI.x + 8, LevelSelectUI.y + 6)
+        love.graphics.print(LevelSelectUI.isOpen and "▲" or "▼", LevelSelectUI.x + LevelSelectUI.buttonWidth - 20, LevelSelectUI.y + 6)
+
+        -- Dropdown entries
+        if LevelSelectUI.isOpen then
+            local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+            local totalH = (rows * LevelSelectUI.rowHeight)
+            love.graphics.setColor(0, 0, 0, 0.6)
+            love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+
+            for i = 1, rows do
+                local fileName = LevelManager.files[i]
+                local cellY = LevelSelectUI.y + LevelSelectUI.buttonHeight + (i - 1) * LevelSelectUI.rowHeight
+                if i == LevelManager.selectedIndex then
+                    love.graphics.setColor(0.9, 0.9, 0.2)
+                else
+                    love.graphics.setColor(1, 1, 1)
+                end
+                love.graphics.print(string.format("%d. %s", i, fileName), LevelSelectUI.x + 8, cellY + 2)
+            end
+
+            if #LevelManager.files == 0 then
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.print("No saved levels yet (press F8)", LevelSelectUI.x + 8, LevelSelectUI.y + LevelSelectUI.buttonHeight + 2)
+            else
+                local deleteX = LevelSelectUI.x + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
+                local deleteY = LevelSelectUI.y + LevelSelectUI.buttonHeight + totalH + 8
+                love.graphics.setColor(0.65, 0.15, 0.15, 0.9)
+                love.graphics.rectangle("fill", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.rectangle("line", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+                love.graphics.print("Delete", deleteX + 12, deleteY + 6)
+            end
+        end
+    end
 
     local cellSize = GameManager.grid.cellSize
 
