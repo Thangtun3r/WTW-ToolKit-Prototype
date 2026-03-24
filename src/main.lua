@@ -1,6 +1,7 @@
 
 local Editor = require("editor")
 local GameManager = require("gameManager")
+_G.GameManager = GameManager
 local Block = require("block")
 local Crusher = require("crusher")
 local StepTracker = require("stepTracker")
@@ -118,6 +119,14 @@ local function serializeValue(value, indent)
     end
 end
 
+local function updateWindowTitleWithLevel()
+    local selectedFile = "(none)"
+    if #LevelManager.files > 0 and LevelManager.selectedIndex >= 1 and LevelManager.selectedIndex <= #LevelManager.files then
+        selectedFile = LevelManager.files[LevelManager.selectedIndex]
+    end
+    love.window.setTitle("Color Bloks 2D - " .. selectedFile)
+end
+
 local function refreshLevelFiles()
     local items = love.filesystem.getDirectoryItems("")
     LevelManager.files = {}
@@ -132,6 +141,26 @@ local function refreshLevelFiles()
     else
         LevelManager.selectedIndex = math.min(LevelManager.selectedIndex, #LevelManager.files)
     end
+    updateWindowTitleWithLevel()
+end
+
+local function updateWindowTitleWithLevel()
+    local selectedFile = "(none)"
+    if #LevelManager.files > 0 and LevelManager.selectedIndex >= 1 and LevelManager.selectedIndex <= #LevelManager.files then
+        selectedFile = LevelManager.files[LevelManager.selectedIndex]
+    end
+    love.window.setTitle("Color Bloks 2D - " .. selectedFile)
+end
+
+local function getNextLevelNumber()
+    local maxNum = 0
+    for _, file in ipairs(LevelManager.files) do
+        local num = tonumber(file:match("^level_(%d+)%.lvl$"))
+        if num and num > maxNum then
+            maxNum = num
+        end
+    end
+    return maxNum + 1
 end
 
 local function saveLevelAs(fileName)
@@ -152,7 +181,9 @@ local function saveLevelAs(fileName)
 end
 
 local function saveLevel()
-    local fileName = "level_" .. os.date("%Y%m%d_%H%M%S") .. ".lvl"
+    refreshLevelFiles()
+    local nextNum = getNextLevelNumber()
+    local fileName = string.format("level_%d.lvl", nextNum)
     return saveLevelAs(fileName)
 end
 
@@ -212,6 +243,7 @@ local function selectNextLevel()
     end
     LevelManager.selectedIndex = LevelManager.selectedIndex % #LevelManager.files + 1
     print("[Load] selected level " .. LevelManager.selectedIndex .. ": " .. LevelManager.files[LevelManager.selectedIndex])
+    updateWindowTitleWithLevel()
 end
 
 local function loadSelectedLevel()
@@ -239,6 +271,7 @@ function love.load()
 
     -- Load saved level list from disk
     refreshLevelFiles()
+    updateWindowTitleWithLevel()
 
     -- Start tracking operations automatically so Ctrl+Z/Ctrl+Y will undo/redo edits directly.
     StepTracker.start({
@@ -495,6 +528,7 @@ function love.mousepressed(x, y, button)
             local clickedRow = math.floor((y - listTop) / LevelSelectUI.rowHeight) + 1
             if clickedRow >= 1 and clickedRow <= #LevelManager.files then
                 LevelManager.selectedIndex = clickedRow
+                updateWindowTitleWithLevel()
                 print("[Load] selected level " .. clickedRow .. ": " .. LevelManager.files[clickedRow])
             end
             LevelSelectUI.isOpen = false
@@ -521,6 +555,7 @@ function love.mousepressed(x, y, button)
                     if #LevelManager.files == 0 then
                         LevelManager.selectedIndex = 1
                     end
+                    updateWindowTitleWithLevel()
                     print("[Load] deleted selected level " .. tostring(fileToDelete))
                 end
                 LevelSelectUI.isOpen = false
