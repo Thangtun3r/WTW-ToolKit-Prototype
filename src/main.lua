@@ -224,7 +224,8 @@ local function loadSelectedLevel()
 end
 
 local dragStart = { x = 0, y = 0, active = false, idx = nil }
-local dragDirection = nil 
+local dragDirection = nil
+local dragMode = nil
 local margin = { x = 60, y = 60 }
 
 
@@ -684,7 +685,9 @@ function love.mousepressed(x, y, button)
                     local sy = margin.y + (b.gridY + s.y) * GameManager.grid.cellSize
                     if x >= sx and x <= sx + GameManager.grid.cellSize and 
                        y >= sy and y <= sy + GameManager.grid.cellSize then
-                        dragStart = {x = x, y = y, active = true, idx = i}
+                        dragStart = {x = x, y = y, active = true, idx = i, startGridX = b.gridX, startGridY = b.gridY, pressTime = love.timer.getTime()}
+                        dragMode = "undetermined"
+                        dragDirection = nil
                         return
                     end
                 end
@@ -768,14 +771,43 @@ function love.mousemoved(x, y, dx, dy)
         return
     end
 
-    if dragStart.active and dragStart.idx and not dragDirection then
+    if dragStart.active and dragStart.idx then
         local diffX = math.abs(x - dragStart.x)
         local diffY = math.abs(y - dragStart.y)
-        if diffX > 10 or diffY > 10 then
-            if diffX > diffY then
-                dragDirection = "horizontal"
+        local elapsed = love.timer.getTime() - (dragStart.pressTime or 0)
+
+        if dragMode == "undetermined" and (diffX > 10 or diffY > 10) then
+            if elapsed >= 0.25 then
+                dragMode = "free"
             else
-                dragDirection = "vertical"
+                dragMode = "slide"
+            end
+        end
+
+        if dragMode == "free" then
+            local b = GameManager.blocks[dragStart.idx]
+            if b then
+                local mouseGridX = math.floor((x - margin.x) / GameManager.grid.cellSize)
+                local mouseGridY = math.floor((y - margin.y) / GameManager.grid.cellSize)
+                -- Keep inside bounds
+                mouseGridX = math.max(0, math.min(GameManager.grid.cols - 1, mouseGridX))
+                mouseGridY = math.max(0, math.min(GameManager.grid.rows - 1, mouseGridY))
+                -- Optional collision check:
+                if GameManager.canBlockFit(dragStart.idx, mouseGridX, mouseGridY) then
+                    b.gridX = mouseGridX
+                    b.gridY = mouseGridY
+                end
+            end
+            return
+        end
+
+        if dragMode ~= "free" and not dragDirection then
+            if diffX > 10 or diffY > 10 then
+                if diffX > diffY then
+                    dragDirection = "horizontal"
+                else
+                    dragDirection = "vertical"
+                end
             end
         end
     end
@@ -783,43 +815,47 @@ end
 
 function love.mousereleased(x, y, button)
     if button == 1 then
-        if dragStart.active and dragStart.idx and dragDirection then
+        if dragStart.active and dragStart.idx then
             local b = GameManager.blocks[dragStart.idx]
             if b then
-                local oldX, oldY = b.gridX, b.gridY
-                local gx, gy = b.gridX, b.gridY
-                local step = 0
-                local moved = false
-                if dragDirection == "horizontal" and (b.moveAxis == "horizontal" or b.moveAxis == "both") then
-                    step = (x > dragStart.x) and 1 or -1
-                    while true do
-                        local nextX = gx + step
-                        if not GameManager.canBlockFit(dragStart.idx, nextX, gy) then break end
-                        gx = nextX
-                        if gx <= 0 or gx >= GameManager.grid.cols - 1 then break end
+                local oldX, oldY = dragStart.startGridX, dragStart.startGridY
+                local toX, toY = b.gridX, b.gridY
+                local moved = (toX ~= oldX or toY ~= oldY)
+
+                if dragMode ~= "free" and dragDirection and b then
+                    local gx, gy = b.gridX, b.gridY
+                    local step = 0
+                    if dragDirection == "horizontal" and (b.moveAxis == "horizontal" or b.moveAxis == "both") then
+                        step = (x > dragStart.x) and 1 or -1
+                        while true do
+                            local nextX = gx + step
+                            if not GameManager.canBlockFit(dragStart.idx, nextX, gy) then break end
+                            gx = nextX
+                            if gx <= 0 or gx >= GameManager.grid.cols - 1 then break end
+                        end
+                        if gx ~= oldX then moved = true end
+                        b.gridX = gx
+                    elseif dragDirection == "vertical" and (b.moveAxis == "vertical" or b.moveAxis == "both") then
+                        step = (y > dragStart.y) and 1 or -1
+                        while true do
+                            local nextY = gy + step
+                            if not GameManager.canBlockFit(dragStart.idx, gx, nextY) then break end
+                            gy = nextY
+                            if gy <= 0 or gy >= GameManager.grid.rows - 1 then break end
+                        end
+                        if gy ~= oldY then moved = true end
+                        b.gridY = gy
                     end
-                    if gx ~= oldX then moved = true end
-                    b.gridX = gx
-                elseif dragDirection == "vertical" and (b.moveAxis == "vertical" or b.moveAxis == "both") then
-                    step = (y > dragStart.y) and 1 or -1
-                    while true do
-                        local nextY = gy + step
-                        if not GameManager.canBlockFit(dragStart.idx, gx, nextY) then break end
-                        gy = nextY
-                        if gy <= 0 or gy >= GameManager.grid.rows - 1 then break end
-                    end
-                    if gy ~= oldY then moved = true end
-                    b.gridY = gy
+                    toX, toY = b.gridX, b.gridY
                 end
+
                 -- Track block move as a step
                 if moved and StepTracker.active then
                     local idx = dragStart.idx
-                    local fromX, fromY = oldX, oldY
-                    local toX, toY = b.gridX, b.gridY
                     StepTracker.recordStep({
                         type = "move_block",
                         blockIdx = idx,
-                        fromX = fromX, fromY = fromY,
+                        fromX = oldX, fromY = oldY,
                         toX = toX, toY = toY,
                         apply = function(state)
                             local block = state.blocks[idx]
@@ -834,6 +870,7 @@ function love.mousereleased(x, y, button)
         end
 
         dragStart = { x = 0, y = 0, active = false, idx = nil }
+        dragMode = nil
         dragDirection = nil
 
         if Editor.painting then
