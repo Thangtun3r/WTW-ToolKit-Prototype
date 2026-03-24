@@ -1,0 +1,558 @@
+return {
+  blocks = {
+    {
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      moveAxis = "vertical",
+      segments = {
+        {
+          isDynamite = false,
+          x = 0,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 0,
+          y = 1
+        },
+        {
+          isDynamite = false,
+          x = 0,
+          y = 2
+        },
+        {
+          isDynamite = false,
+          x = 1,
+          y = 2
+        }
+      },
+      isStatic = false,
+      viewX = 120,
+      gridX = 1,
+      gridY = 3,
+      lerpSpeed = 18,
+      viewY = 240,
+      isCrushed = false
+    },
+    {
+      color = {
+        0.3,
+        1,
+        0.3
+      },
+      moveAxis = "vertical",
+      segments = {
+        {
+          isDynamite = false,
+          x = 0,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 1,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 1
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 2
+        }
+      },
+      isStatic = false,
+      viewX = 180,
+      gridX = 2,
+      gridY = 4,
+      lerpSpeed = 18,
+      viewY = 300,
+      isCrushed = false
+    },
+    {
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      moveAxis = "vertical",
+      segments = {
+        {
+          isDynamite = false,
+          x = 0,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 0,
+          y = 1
+        },
+        {
+          isDynamite = false,
+          x = 1,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 1
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 2
+        }
+      },
+      isStatic = false,
+      viewX = 120,
+      gridX = 1,
+      gridY = 1,
+      lerpSpeed = 18,
+      viewY = 120,
+      isCrushed = false
+    },
+    {
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      moveAxis = "vertical",
+      segments = {
+        {
+          isDynamite = false,
+          x = 0,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 0,
+          y = 1
+        },
+        {
+          isDynamite = false,
+          x = 1,
+          y = 0
+        },
+        {
+          isDynamite = false,
+          x = 2,
+          y = 0
+        }
+      },
+      isStatic = false,
+      viewX = 300,
+      gridX = 4,
+      gridY = 7,
+      lerpSpeed = 18,
+      viewY = 480,
+      isCrushed = false
+    }
+  },
+  crushers = {
+    {
+      gridY = 5,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 6,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 8,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 6
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 5
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 4
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 3
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 2
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 1
+    },
+    {
+      gridY = 9,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 8,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 7,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 6,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 5,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 4,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 2,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 1,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 3,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 1
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 2
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 3
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 4
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 5
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 6
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 1,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 2,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 7
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        0.3,
+        0.6,
+        1
+      },
+      isMulti = false,
+      gridX = 0
+    },
+    {
+      gridY = 0,
+      isTrigger = false,
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      isMulti = false,
+      gridX = 10
+    },
+    {
+      gridY = 4,
+      dualColor = {
+        1,
+        1,
+        0.3
+      },
+      isTrigger = false,
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      isMulti = true,
+      gridX = 7
+    },
+    {
+      gridY = 3,
+      dualColor = {
+        1,
+        1,
+        0.3
+      },
+      isTrigger = false,
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      isMulti = true,
+      gridX = 7
+    },
+    {
+      gridY = 7,
+      dualColor = {
+        0.3,
+        0.6,
+        1
+      },
+      isTrigger = false,
+      color = {
+        1,
+        0.3,
+        0.3
+      },
+      isMulti = true,
+      gridX = 7
+    }
+  },
+  grid = {
+    cols = 8,
+    rows = 10,
+    cellSize = 60,
+    playArea = {
+      x1 = 1,
+      y1 = 1,
+      x2 = 6,
+      y2 = 8
+    }
+  }
+}

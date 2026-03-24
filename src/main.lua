@@ -127,14 +127,29 @@ local function updateWindowTitleWithLevel()
     love.window.setTitle("Color Bloks 2D - " .. selectedFile)
 end
 
+local LEVEL_FOLDER = "src"
+
 local function refreshLevelFiles()
-    local items = love.filesystem.getDirectoryItems("")
     LevelManager.files = {}
+
+    -- List from love.save path
+    local items = love.filesystem.getDirectoryItems("")
     for _, file in ipairs(items) do
         if file:match("^level_.*%.lvl$") then
             table.insert(LevelManager.files, file)
         end
     end
+
+    -- Also include files stored in src folder (for external easy edit)
+    if love.filesystem.getInfo(LEVEL_FOLDER) then
+        local srcItems = love.filesystem.getDirectoryItems(LEVEL_FOLDER)
+        for _, file in ipairs(srcItems) do
+            if file:match("^level_.*%.lvl$") then
+                table.insert(LevelManager.files, file)
+            end
+        end
+    end
+
     table.sort(LevelManager.files)
     if #LevelManager.files == 0 then
         LevelManager.selectedIndex = 1
@@ -170,12 +185,26 @@ local function saveLevelAs(fileName)
         blocks = GameManager.blocks,
     }
     local content = "return " .. serializeValue(snapshot)
+
+    -- Save into LÖVE save directory for reliability
     local ok, err = love.filesystem.write(fileName, content)
     if not ok then
-        print("[Save] Failed to save level to " .. fileName .. ": " .. tostring(err))
-        return false
+        print("[Save] Failed to save level to " .. fileName .. " in love.save: " .. tostring(err))
+    else
+        print("[Save] Level saved to love.save/" .. fileName)
     end
-    print("[Save] Level saved to " .. fileName)
+
+    -- Also save a copy to src/ for easy editing in repository
+    local localPath = LEVEL_FOLDER .. "/" .. fileName
+    local f, localErr = io.open(localPath, "w")
+    if f then
+        f:write(content)
+        f:close()
+        print("[Save] Level saved to " .. localPath)
+    else
+        print("[Save] Failed to save level to " .. localPath .. ": " .. tostring(localErr))
+    end
+
     refreshLevelFiles()
     return true
 end
@@ -214,11 +243,23 @@ local function applyLoadedLevel(levelData)
 end
 
 local function loadLevel(fileName)
-    if not love.filesystem.getInfo(fileName) then
-        print("[Load] level file not found: " .. tostring(fileName))
-        return false
+    local content, err
+
+    if love.filesystem.getInfo(fileName) then
+        content, err = love.filesystem.read(fileName)
+    else
+        -- fallback to src folder if file exists there
+        local localPath = LEVEL_FOLDER .. "/" .. fileName
+        local f = io.open(localPath, "r")
+        if f then
+            content = f:read("*a")
+            f:close()
+        else
+            print("[Load] level file not found: " .. tostring(fileName) .. " or " .. tostring(localPath))
+            return false
+        end
     end
-    local content, err = love.filesystem.read(fileName)
+
     if not content then
         print("[Load] can't read level file: " .. tostring(err))
         return false
@@ -297,6 +338,7 @@ function love.keypressed(key, scancode, isrepeat)
     if key == 'f9' then lastStepKey = 'F9 (Select Next Saved Level)' end
     if key == 'f10' then lastStepKey = 'F10 (Load Selected Level)' end
     if key == 'l' then lastStepKey = 'L (Refresh Level List)' end
+    if key == 'f' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+F (Toggle Focus)' end
     if key == 's' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+S (Save Selected Level)' end
     if key == 'z' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Z (Undo)' end
     if key == 'y' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Y (Redo)' end
@@ -335,7 +377,7 @@ function love.keypressed(key, scancode, isrepeat)
     elseif key == 'f10' then -- Load selected saved level file
         loadSelectedLevel()
         return
-    elseif key == 'f12' then -- Focus mode toggle
+    elseif key == 'f' and love.keyboard.isDown('lctrl','rctrl') then -- Focus mode toggle via Ctrl+F
         focusMode = not focusMode
         if focusMode then
             LevelSelectUI.isOpen = false
@@ -956,7 +998,7 @@ function love.draw()
         -- Shortcut help HUD in bottom-right
         local helpY = winH - 60
         love.graphics.printf("F5: Start Tracking  F6: Revert Snapshot  F7: Save Snapshot", 0, helpY, winW - 10, "right")
-        love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  F12: Toggle Focus", 0, helpY + 18, winW - 10, "right")
+        love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  Ctrl+F: Toggle Focus", 0, helpY + 18, winW - 10, "right")
         love.graphics.printf("Ctrl+S: Save Selected  Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 36, winW - 10, "right")
     else
         -- focus mode: minimal display (no dropdown/UI)
@@ -1057,13 +1099,36 @@ function love.draw()
     end
     love.graphics.pop()
 
+    local function blockHasSegmentAt(segments, checkX, checkY)
+        for _, s2 in ipairs(segments) do
+            if s2.x == checkX and s2.y == checkY then
+                return true
+            end
+        end
+        return false
+    end
+
     for _, b in ipairs(GameManager.blocks) do
         local alpha = b.isStatic and 0.8 or 1
         love.graphics.setColor(b.color[1], b.color[2], b.color[3], alpha)
         for _, s in ipairs(b.segments) do
             local drawX, drawY = b.viewX + s.x * cellSize, b.viewY + s.y * cellSize
+            local leftPad = blockHasSegmentAt(b.segments, s.x - 1, s.y) and 0 or 4
+            local rightPad = blockHasSegmentAt(b.segments, s.x + 1, s.y) and 0 or 4
+            local topPad = blockHasSegmentAt(b.segments, s.x, s.y - 1) and 0 or 4
+            local bottomPad = blockHasSegmentAt(b.segments, s.x, s.y + 1) and 0 or 4
+            local rectX = drawX + leftPad
+            local rectY = drawY + topPad
+            local rectW = cellSize - leftPad - rightPad
+            local rectH = cellSize - topPad - bottomPad
+
             love.graphics.setColor(b.color[1], b.color[2], b.color[3], alpha)
-            love.graphics.rectangle("fill", drawX + 4, drawY + 4, cellSize - 8, cellSize - 8)
+            love.graphics.rectangle("fill", rectX, rectY, rectW, rectH)
+
+            -- Inner semi-transparent white overlay to give grid inner highlight
+            love.graphics.setColor(1, 1, 1, 0.05)
+            love.graphics.rectangle("fill", rectX, rectY, rectW, rectH)
+
             if s.isDynamite then
                 if dynamiteImg then
                     local scale = (cellSize * 0.55) / math.max(dynamiteImg:getWidth(), dynamiteImg:getHeight())

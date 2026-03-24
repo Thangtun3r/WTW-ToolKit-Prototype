@@ -32,29 +32,12 @@ function Crusher.draw(c, cellSize)
     local centerX = c.gridX * cellSize + cellSize/2
     local centerY = c.gridY * cellSize + cellSize/2
     local radius = size/2
-
-    if c.isMulti and c.dualColor then
-        -- Two-color crusher: top half one color, bottom half second color
-        local col1 = desaturate(c.color, sat)
-        love.graphics.setColor(col1[1], col1[2], col1[3], alpha)
-        love.graphics.arc("fill", centerX, centerY, radius, -math.pi, 0)
-
-        local col2 = desaturate(c.dualColor, sat)
-        love.graphics.setColor(col2[1], col2[2], col2[3], alpha)
-        love.graphics.arc("fill", centerX, centerY, radius, 0, math.pi)
-    else
-        -- Single color crusher as circle
-        local col = desaturate(c.color, sat)
-        love.graphics.setColor(col[1], col[2], col[3], alpha)
-        love.graphics.circle("fill", centerX, centerY, radius)
-    end
-
-    -- Draw small centered triangle inside the circle, direction based on nearest block needed
     local triSize = radius * 0.5
 
     local function getNearestBlockDirection()
-        local minDist = math.huge
         local bestDir = "down"
+        local bestDist = math.huge
+        local foundAnyBlock = false
         local dirs = {
             {dx = 1, dy = 0, name = "right"},
             {dx = -1, dy = 0, name = "left"},
@@ -64,9 +47,13 @@ function Crusher.draw(c, cellSize)
 
         local maxSteps = math.max(GameManager.grid.cols, GameManager.grid.rows)
         for _, d in ipairs(dirs) do
+            local dist = math.huge
+            local blockFoundThisDir = false
+
             for step = 1, maxSteps do
                 local px = c.gridX + d.dx * step
                 local py = c.gridY + d.dy * step
+
                 if px < 0 or px >= GameManager.grid.cols or py < 0 or py >= GameManager.grid.rows then
                     break
                 end
@@ -76,20 +63,41 @@ function Crusher.draw(c, cellSize)
                         local sx = b.gridX + s.x
                         local sy = b.gridY + s.y
                         if sx == px and sy == py then
-                            if step < minDist then
-                                minDist = step
-                                bestDir = d.name
-                            end
+                            dist = step
+                            blockFoundThisDir = true
+                            foundAnyBlock = true
                             break
                         end
                     end
-                    if minDist == step and bestDir == d.name then
-                        break
-                    end
+                    if blockFoundThisDir then break end
                 end
-                if minDist == step and bestDir == d.name then
+
+                if blockFoundThisDir then
                     break
                 end
+            end
+
+            if blockFoundThisDir and dist < bestDist then
+                bestDist = dist
+                bestDir = d.name
+            end
+        end
+
+        if not foundAnyBlock then
+            -- Treat the play area (6x8 center box) as an invisible target zone.
+            local play = GameManager.grid.playArea -- expects {x1=1,y1=1,x2=6,y2=8}
+            local targetX = math.max(play.x1, math.min(play.x2, c.gridX))
+            local targetY = math.max(play.y1, math.min(play.y2, c.gridY))
+            local dx = targetX - c.gridX
+            local dy = targetY - c.gridY
+
+            if dx == 0 and dy == 0 then
+                -- Already in play area; keep existing default direction
+                bestDir = "down"
+            elseif math.abs(dx) > math.abs(dy) then
+                bestDir = (dx > 0) and "right" or "left"
+            else
+                bestDir = (dy > 0) and "down" or "up"
             end
         end
 
@@ -97,6 +105,45 @@ function Crusher.draw(c, cellSize)
     end
 
     local dir = getNearestBlockDirection()
+
+    -- Default triangle rotation plus a 180 degree flip
+    local function oppositeDirection(d)
+        if d == "right" then return "left" end
+        if d == "left" then return "right" end
+        if d == "up" then return "down" end
+        return "up"
+    end
+    dir = oppositeDirection(dir)
+
+    local function dirToAngle(d)
+        if d == "right" then return math.pi/2 end
+        if d == "left" then return -math.pi/2 end
+        if d == "up" then return math.pi end
+        return 0
+    end
+
+    if c.isMulti and c.dualColor then
+        local col1 = desaturate(c.color, sat)
+        local col2 = desaturate(c.dualColor, sat)
+        local angle = dirToAngle(dir) + math.pi/2
+
+        love.graphics.push()
+        love.graphics.translate(centerX, centerY)
+        love.graphics.rotate(angle)
+
+        love.graphics.setColor(col1[1], col1[2], col1[3], alpha)
+        love.graphics.arc("fill", 0, 0, radius, -math.pi, 0)
+
+        love.graphics.setColor(col2[1], col2[2], col2[3], alpha)
+        love.graphics.arc("fill", 0, 0, radius, 0, math.pi)
+
+        love.graphics.pop()
+    else
+        local col = desaturate(c.color, sat)
+        love.graphics.setColor(col[1], col[2], col[3], alpha)
+        love.graphics.circle("fill", centerX, centerY, radius)
+    end
+
     local t1x, t1y, t2x, t2y, t3x, t3y
 
     if dir == "right" then
@@ -117,10 +164,10 @@ function Crusher.draw(c, cellSize)
         t3x = centerX + triSize * 0.4; t3y = centerY - triSize * 0.3
     end
 
-    love.graphics.setBlendMode("alpha")
-    love.graphics.setColor(1, 1, 1, 0.5)
+    love.graphics.setBlendMode("subtract")
+    love.graphics.setColor(1, 1, 1, 0.1)
     love.graphics.polygon("fill", t1x, t1y, t2x, t2y, t3x, t3y)
-    -- keep blend mode normal for rest
+    love.graphics.setBlendMode("alpha")
 
     love.graphics.setColor(1, 1, 1, 1)
     love.graphics.circle("line", centerX, centerY, radius)
