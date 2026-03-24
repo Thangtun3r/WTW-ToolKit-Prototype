@@ -227,6 +227,8 @@ local dragStart = { x = 0, y = 0, active = false, idx = nil }
 local dragDirection = nil
 local dragMode = nil
 local margin = { x = 60, y = 60 }
+local focusMode = false
+local normalWindow = { w = 1000, h = 700 }
 
 
 function love.load()
@@ -299,6 +301,18 @@ function love.keypressed(key, scancode, isrepeat)
         return
     elseif key == 'f10' then -- Load selected saved level file
         loadSelectedLevel()
+        return
+    elseif key == 'f12' then -- Focus mode toggle
+        focusMode = not focusMode
+        if focusMode then
+            LevelSelectUI.isOpen = false
+            local gw = GameManager.grid.cols * GameManager.grid.cellSize + margin.x * 2
+            local gh = GameManager.grid.rows * GameManager.grid.cellSize + margin.y * 2
+            love.window.setMode(gw, gh)
+        else
+            love.window.setMode(normalWindow.w, normalWindow.h)
+        end
+        print("Focus mode: " .. tostring(focusMode))
         return
     elseif key == 'l' then -- Refresh saved level list
         refreshLevelFiles()
@@ -459,20 +473,23 @@ end
 
 function love.mousepressed(x, y, button)
     -- 0. Saved-level dropdown
-    local renderX = love.graphics.getWidth() - LevelSelectUI.buttonWidth - 10
-    local renderY = love.graphics.getHeight() - 140
-    local buttonX1, buttonY1 = renderX, renderY
-    local buttonX2, buttonY2 = renderX + LevelSelectUI.buttonWidth, renderY + LevelSelectUI.buttonHeight
+    if focusMode then
+        LevelSelectUI.isOpen = false
+    else
+        local renderX = love.graphics.getWidth() - LevelSelectUI.buttonWidth - 10
+        local renderY = love.graphics.getHeight() - 140
+        local buttonX1, buttonY1 = renderX, renderY
+        local buttonX2, buttonY2 = renderX + LevelSelectUI.buttonWidth, renderY + LevelSelectUI.buttonHeight
 
-    if button == 1 and x >= buttonX1 and x <= buttonX2 and y >= buttonY1 and y <= buttonY2 then
-        LevelSelectUI.isOpen = not LevelSelectUI.isOpen
-        return
-    end
+        if button == 1 and x >= buttonX1 and x <= buttonX2 and y >= buttonY1 and y <= buttonY2 then
+            LevelSelectUI.isOpen = not LevelSelectUI.isOpen
+            return
+        end
 
-    if LevelSelectUI.isOpen then
-        local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
-        local listTop = renderY + LevelSelectUI.buttonHeight
-        local listBottom = listTop + rows * LevelSelectUI.rowHeight
+        if LevelSelectUI.isOpen then
+            local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+            local listTop = renderY + LevelSelectUI.buttonHeight
+            local listBottom = listTop + rows * LevelSelectUI.rowHeight
 
         if button == 1 and x >= renderX and x <= renderX + LevelSelectUI.buttonWidth and y >= listTop and y <= listBottom then
             local clickedRow = math.floor((y - listTop) / LevelSelectUI.rowHeight) + 1
@@ -516,6 +533,7 @@ function love.mousepressed(x, y, button)
             LevelSelectUI.isOpen = false
             -- continue to game UI interactions
         end
+    end
     end
 
     -- 1. UI CHECK: Check if clicking the Sidebar Editor area
@@ -777,7 +795,7 @@ function love.mousemoved(x, y, dx, dy)
         local elapsed = love.timer.getTime() - (dragStart.pressTime or 0)
 
         if dragMode == "undetermined" and (diffX > 10 or diffY > 10) then
-            if elapsed >= 0.25 then
+            if elapsed >= 0.15 then
                 dragMode = "free"
             else
                 dragMode = "slide"
@@ -886,71 +904,84 @@ end
 
 function love.draw()
     -- Tracking indicator and step count with color
-    if StepTracker.active then
-        love.graphics.setColor(0, 1, 0, 1) -- Green for tracking
-    else
-        love.graphics.setColor(1, 0, 0, 1) -- Red for not tracking
-    end
-    local trackingText = StepTracker.active and ("[TRACKING]  Steps: " .. tostring(StepTracker.stepCount or 0)) or "[NOT TRACKING]"
-    love.graphics.print(trackingText, 10, 10)
-    love.graphics.setColor(1, 1, 1, 1)
-    if lastStepKey ~= "" then
-        love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
-    end
-
-    -- Shortcut help HUD in bottom-right
     local winW, winH = love.graphics.getWidth(), love.graphics.getHeight()
-    local helpY = winH - 60
-    love.graphics.printf("F5: Start Tracking  F6: Revert Snapshot  F7: Save Snapshot", 0, helpY, winW - 10, "right")
-    love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  L: List Levels", 0, helpY + 18, winW - 10, "right")
-    love.graphics.printf("Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 36, winW - 10, "right")
+    if not focusMode then
+        if StepTracker.active then
+            love.graphics.setColor(0, 1, 0, 1) -- Green for tracking
+        else
+            love.graphics.setColor(1, 0, 0, 1) -- Red for not tracking
+        end
+        local trackingText = StepTracker.active and ("[TRACKING]  Steps: " .. tostring(StepTracker.stepCount or 0)) or "[NOT TRACKING]"
+        love.graphics.print(trackingText, 10, 10)
+        love.graphics.setColor(1, 1, 1, 1)
+        if lastStepKey ~= "" then
+            love.graphics.print("Last Step Key: " .. lastStepKey, 10, 30)
+        end
+
+        -- Shortcut help HUD in bottom-right
+        local helpY = winH - 60
+        love.graphics.printf("F5: Start Tracking  F6: Revert Snapshot  F7: Save Snapshot", 0, helpY, winW - 10, "right")
+        love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  F12: Toggle Focus", 0, helpY + 18, winW - 10, "right")
+        love.graphics.printf("Ctrl+S: Save Selected  Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 36, winW - 10, "right")
+    else
+        -- focus mode: minimal display (no dropdown/UI)
+        -- just keep grid+blocks drawing below
+        love.graphics.setColor(1, 1, 1, 1)
+        -- optionally could draw a small subtitle for mode but requirement says hide
+        -- love.graphics.printf("[FOCUS MODE]", 10, 10, winW - 20, "left")
+    end
 
     -- drop the old footer "Selected Level" text to reduce left-corner clutter
 
-    -- Saved Level dropdown-style menu (bottom-right)
-    LevelSelectUI.x = winW - LevelSelectUI.buttonWidth - 10
-    LevelSelectUI.y = winH - 140
+    if focusMode then
+        -- hide level dropdown UI in focus mode
+        LevelSelectUI.isOpen = false
+    else
+        -- Saved Level dropdown-style menu only in normal mode
+        LevelSelectUI.x = winW - LevelSelectUI.buttonWidth - 10
+        LevelSelectUI.y = winH - 140
 
-    -- Button line
-    local selectedFile = (#LevelManager.files > 0) and (LevelManager.files[LevelManager.selectedIndex] or "(none)") or "(none)"
-    love.graphics.setColor(0.15, 0.15, 0.15, 0.8)
-    love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
-    love.graphics.print("Level: " .. selectedFile, LevelSelectUI.x + 8, LevelSelectUI.y + 6)
-    love.graphics.print(LevelSelectUI.isOpen and "▲" or "▼", LevelSelectUI.x + LevelSelectUI.buttonWidth - 20, LevelSelectUI.y + 6)
-
-    -- Dropdown entries
-    if LevelSelectUI.isOpen then
-        local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
-        local totalH = (rows * LevelSelectUI.rowHeight)
-        love.graphics.setColor(0, 0, 0, 0.6)
-        love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+        -- Button line
+        local selectedFile = (#LevelManager.files > 0) and (LevelManager.files[LevelManager.selectedIndex] or "(none)") or "(none)"
+        love.graphics.setColor(0.15, 0.15, 0.15, 0.8)
+        love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
         love.graphics.setColor(1, 1, 1)
-        love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+        love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
+        love.graphics.print("Level: " .. selectedFile, LevelSelectUI.x + 8, LevelSelectUI.y + 6)
+        love.graphics.print(LevelSelectUI.isOpen and "▲" or "▼", LevelSelectUI.x + LevelSelectUI.buttonWidth - 20, LevelSelectUI.y + 6)
 
-        for i = 1, rows do
-            local fileName = LevelManager.files[i]
-            local cellY = LevelSelectUI.y + LevelSelectUI.buttonHeight + (i - 1) * LevelSelectUI.rowHeight
-            if i == LevelManager.selectedIndex then
-                love.graphics.setColor(0.9, 0.9, 0.2)
-            else
-                love.graphics.setColor(1, 1, 1)
+        -- Dropdown entries
+        if LevelSelectUI.isOpen then
+            local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+            local totalH = (rows * LevelSelectUI.rowHeight)
+            love.graphics.setColor(0, 0, 0, 0.6)
+            love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+
+            for i = 1, rows do
+                local fileName = LevelManager.files[i]
+                local cellY = LevelSelectUI.y + LevelSelectUI.buttonHeight + (i - 1) * LevelSelectUI.rowHeight
+                if i == LevelManager.selectedIndex then
+                    love.graphics.setColor(0.9, 0.9, 0.2)
+                else
+                    love.graphics.setColor(1, 1, 1)
+                end
+                love.graphics.print(string.format("%d. %s", i, fileName), LevelSelectUI.x + 8, cellY + 2)
             end
-            love.graphics.print(string.format("%d. %s", i, fileName), LevelSelectUI.x + 8, cellY + 2)
-        end
 
-        if #LevelManager.files == 0 then
-            love.graphics.setColor(1, 1, 1)
-            love.graphics.print("No saved levels yet (press F8)", LevelSelectUI.x + 8, LevelSelectUI.y + LevelSelectUI.buttonHeight + 2)
-        else
-            local deleteX = LevelSelectUI.x + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
-            local deleteY = LevelSelectUI.y + LevelSelectUI.buttonHeight + totalH + 8
-            love.graphics.setColor(0.65, 0.15, 0.15, 0.9)
-            love.graphics.rectangle("fill", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
-            love.graphics.setColor(1, 1, 1)
-            love.graphics.rectangle("line", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
-            love.graphics.print("Delete", deleteX + 12, deleteY + 6)
+            if #LevelManager.files == 0 then
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.print("No saved levels yet (press F8)", LevelSelectUI.x + 8, LevelSelectUI.y + LevelSelectUI.buttonHeight + 2)
+            else
+                local deleteX = LevelSelectUI.x + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
+                local deleteY = LevelSelectUI.y + LevelSelectUI.buttonHeight + totalH + 8
+                love.graphics.setColor(0.65, 0.15, 0.15, 0.9)
+                love.graphics.rectangle("fill", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+                love.graphics.setColor(1, 1, 1)
+                love.graphics.rectangle("line", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+                love.graphics.print("Delete", deleteX + 12, deleteY + 6)
+            end
         end
     end
 
