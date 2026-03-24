@@ -63,6 +63,166 @@ local function triggerCrusherAt(c)
     end
 end
 
+-- Level save/load helpers
+local LevelManager = {
+    files = {},
+    selectedIndex = 1,
+}
+
+local LevelSelectUI = {
+    x = 10,
+    y = 50,
+    w = 400,
+    rowHeight = 20,
+    maxRows = 8,
+    isOpen = false,
+    buttonHeight = 26,
+    buttonWidth = 420,
+    deleteButtonHeight = 26,
+    deleteButtonWidth = 100,
+}
+
+local function serializeValue(value, indent)
+    indent = indent or ""
+    local t = type(value)
+    if t == "number" or t == "boolean" then
+        return tostring(value)
+    elseif t == "string" then
+        return string.format("%q", value)
+    elseif t == "table" then
+        local isArray = true
+        local maxIndex = 0
+        for k, _ in pairs(value) do
+            if type(k) ~= "number" then
+                isArray = false
+                break
+            end
+            maxIndex = math.max(maxIndex, k)
+        end
+        local parts = {}
+        local nextIndent = indent .. "  "
+        if isArray then
+            for i = 1, maxIndex do
+                table.insert(parts, nextIndent .. serializeValue(value[i], nextIndent))
+            end
+            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+        else
+            for k, v in pairs(value) do
+                local keypart = (type(k) == "string" and k:match("^%a[%w_]*$") and k or "[" .. serializeValue(k) .. "]")
+                table.insert(parts, nextIndent .. keypart .. " = " .. serializeValue(v, nextIndent))
+            end
+            return "{\n" .. table.concat(parts, ",\n") .. "\n" .. indent .. "}"
+        end
+    else
+        return "nil"
+    end
+end
+
+local function refreshLevelFiles()
+    local items = love.filesystem.getDirectoryItems("")
+    LevelManager.files = {}
+    for _, file in ipairs(items) do
+        if file:match("^level_.*%.lvl$") then
+            table.insert(LevelManager.files, file)
+        end
+    end
+    table.sort(LevelManager.files)
+    if #LevelManager.files == 0 then
+        LevelManager.selectedIndex = 1
+    else
+        LevelManager.selectedIndex = math.min(LevelManager.selectedIndex, #LevelManager.files)
+    end
+end
+
+local function saveLevelAs(fileName)
+    local snapshot = {
+        grid = GameManager.grid,
+        crushers = GameManager.crushers,
+        blocks = GameManager.blocks,
+    }
+    local content = "return " .. serializeValue(snapshot)
+    local ok, err = love.filesystem.write(fileName, content)
+    if not ok then
+        print("[Save] Failed to save level to " .. fileName .. ": " .. tostring(err))
+        return false
+    end
+    print("[Save] Level saved to " .. fileName)
+    refreshLevelFiles()
+    return true
+end
+
+local function saveLevel()
+    local fileName = "level_" .. os.date("%Y%m%d_%H%M%S") .. ".lvl"
+    return saveLevelAs(fileName)
+end
+
+local function applyLoadedLevel(levelData)
+    if not levelData or type(levelData) ~= "table" then
+        print("[Load] invalid level data")
+        return false
+    end
+    if levelData.grid then
+        GameManager.grid = levelData.grid
+    end
+
+    GameManager.crushers = {}
+    for _, c in ipairs(levelData.crushers or {}) do
+        table.insert(GameManager.crushers, Crusher.new(c.gridX or 0, c.gridY or 0, c.color or {1,1,1}, c.dualColor, c.isTrigger))
+    end
+
+    GameManager.blocks = {}
+    for _, b in ipairs(levelData.blocks or {}) do
+        local block = Block.new(b.gridX or 0, b.gridY or 0, b.segments or {}, b.color or {1,1,1}, b.moveAxis or "both", GameManager.grid.cellSize, b.isStatic)
+        block.viewX = (b.viewX or (margin.x + (b.gridX or 0) * GameManager.grid.cellSize))
+        block.viewY = (b.viewY or (margin.y + (b.gridY or 0) * GameManager.grid.cellSize))
+        table.insert(GameManager.blocks, block)
+    end
+
+    print("[Load] Level loaded")
+    return true
+end
+
+local function loadLevel(fileName)
+    if not love.filesystem.getInfo(fileName) then
+        print("[Load] level file not found: " .. tostring(fileName))
+        return false
+    end
+    local content, err = love.filesystem.read(fileName)
+    if not content then
+        print("[Load] can't read level file: " .. tostring(err))
+        return false
+    end
+    local chunk, err2 = loadstring(content)
+    if not chunk then
+        print("[Load] invalid level file format: " .. tostring(err2))
+        return false
+    end
+    local ok, data = pcall(chunk)
+    if not ok then
+        print("[Load] error executing level file: " .. tostring(data))
+        return false
+    end
+    return applyLoadedLevel(data)
+end
+
+local function selectNextLevel()
+    if #LevelManager.files == 0 then
+        print("[Load] no saved levels available")
+        return
+    end
+    LevelManager.selectedIndex = LevelManager.selectedIndex % #LevelManager.files + 1
+    print("[Load] selected level " .. LevelManager.selectedIndex .. ": " .. LevelManager.files[LevelManager.selectedIndex])
+end
+
+local function loadSelectedLevel()
+    if #LevelManager.files == 0 then
+        print("[Load] no saved levels available")
+        return
+    end
+    local fileName = LevelManager.files[LevelManager.selectedIndex]
+    loadLevel(fileName)
+end
+
 local dragStart = { x = 0, y = 0, active = false, idx = nil }
 local dragDirection = nil 
 local margin = { x = 60, y = 60 }
@@ -73,6 +233,9 @@ function love.load()
     love.window.setTitle("Color Bloks 2D")
     Editor.load()
     Editor.offsetX = 650
+
+    -- Load saved level list from disk
+    refreshLevelFiles()
 
     -- Start tracking operations automatically so Ctrl+Z/Ctrl+Y will undo/redo edits directly.
     StepTracker.start({
@@ -94,6 +257,11 @@ function love.keypressed(key, scancode, isrepeat)
     if key == 'f5' then lastStepKey = 'F5 (Start Tracking)' end
     if key == 'f6' then lastStepKey = 'F6 (Revert Snapshot)' end
     if key == 'f7' then lastStepKey = 'F7 (Save Snapshot)' end
+    if key == 'f8' then lastStepKey = 'F8 (Save Level)' end
+    if key == 'f9' then lastStepKey = 'F9 (Select Next Saved Level)' end
+    if key == 'f10' then lastStepKey = 'F10 (Load Selected Level)' end
+    if key == 'l' then lastStepKey = 'L (Refresh Level List)' end
+    if key == 's' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+S (Save Selected Level)' end
     if key == 'z' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Z (Undo)' end
     if key == 'y' and love.keyboard.isDown('lctrl','rctrl') then lastStepKey = 'Ctrl+Y (Redo)' end
     -- StepTracker controls
@@ -121,6 +289,31 @@ function love.keypressed(key, scancode, isrepeat)
             editor = Editor,
         })
         print("Snapshot saved")
+        return
+    elseif key == 'f8' then -- Save level to file
+        saveLevel()
+        return
+    elseif key == 'f9' then -- Select next saved level file
+        selectNextLevel()
+        return
+    elseif key == 'f10' then -- Load selected saved level file
+        loadSelectedLevel()
+        return
+    elseif key == 'l' then -- Refresh saved level list
+        refreshLevelFiles()
+        print("[Load] available saved levels:")
+        for i, fileName in ipairs(LevelManager.files) do
+            local selected = (i == LevelManager.selectedIndex) and "*" or " "
+            print(string.format("%s %d. %s", selected, i, fileName))
+        end
+        return
+    elseif key == 's' and love.keyboard.isDown('lctrl','rctrl') then -- Save selected level (or new)
+        local selectedName = LevelManager.files[LevelManager.selectedIndex]
+        if selectedName then
+            saveLevelAs(selectedName)
+        else
+            saveLevel()
+        end
         return
     elseif key == 'z' and love.keyboard.isDown('lctrl','rctrl') then -- Undo
         if StepTracker.active then
@@ -264,6 +457,66 @@ function love.update(dt)
 end
 
 function love.mousepressed(x, y, button)
+    -- 0. Saved-level dropdown
+    local renderX = love.graphics.getWidth() - LevelSelectUI.buttonWidth - 10
+    local renderY = love.graphics.getHeight() - 140
+    local buttonX1, buttonY1 = renderX, renderY
+    local buttonX2, buttonY2 = renderX + LevelSelectUI.buttonWidth, renderY + LevelSelectUI.buttonHeight
+
+    if button == 1 and x >= buttonX1 and x <= buttonX2 and y >= buttonY1 and y <= buttonY2 then
+        LevelSelectUI.isOpen = not LevelSelectUI.isOpen
+        return
+    end
+
+    if LevelSelectUI.isOpen then
+        local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+        local listTop = renderY + LevelSelectUI.buttonHeight
+        local listBottom = listTop + rows * LevelSelectUI.rowHeight
+
+        if button == 1 and x >= renderX and x <= renderX + LevelSelectUI.buttonWidth and y >= listTop and y <= listBottom then
+            local clickedRow = math.floor((y - listTop) / LevelSelectUI.rowHeight) + 1
+            if clickedRow >= 1 and clickedRow <= #LevelManager.files then
+                LevelManager.selectedIndex = clickedRow
+                print("[Load] selected level " .. clickedRow .. ": " .. LevelManager.files[clickedRow])
+            end
+            LevelSelectUI.isOpen = false
+            return
+        end
+
+        -- right click delete is disabled in level dropdown; use Delete button
+        -- (keep this block removed to avoid accidental delete via right mouse button)
+
+
+        if button == 1 then
+            local deleteX = renderX + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
+            local deleteY = renderY + LevelSelectUI.buttonHeight + (math.min(#LevelManager.files, LevelSelectUI.maxRows) * LevelSelectUI.rowHeight) + 8
+            if x >= deleteX and x <= deleteX + LevelSelectUI.deleteButtonWidth and y >= deleteY and y <= deleteY + LevelSelectUI.deleteButtonHeight then
+                if #LevelManager.files > 0 then
+                    local fileToDelete = LevelManager.files[LevelManager.selectedIndex]
+                    if love.filesystem.getInfo(fileToDelete) then
+                        love.filesystem.remove(fileToDelete)
+                    end
+                    table.remove(LevelManager.files, LevelManager.selectedIndex)
+                    if LevelManager.selectedIndex > #LevelManager.files then
+                        LevelManager.selectedIndex = math.max(1, #LevelManager.files)
+                    end
+                    if #LevelManager.files == 0 then
+                        LevelManager.selectedIndex = 1
+                    end
+                    print("[Load] deleted selected level " .. tostring(fileToDelete))
+                end
+                LevelSelectUI.isOpen = false
+                return
+            end
+        end
+
+        -- Click outside to close
+        if button == 1 and not (x >= renderX and x <= renderX + LevelSelectUI.buttonWidth and y >= renderY and y <= listBottom + LevelSelectUI.deleteButtonHeight + 8) then
+            LevelSelectUI.isOpen = false
+            -- continue to game UI interactions
+        end
+    end
+
     -- 1. UI CHECK: Check if clicking the Sidebar Editor area
     if button == 1 and x > Editor.offsetX - 20 then
         local result = Editor.mousepressed(x, y)
@@ -610,10 +863,59 @@ function love.draw()
 
     -- Shortcut help HUD in bottom-right
     local winW, winH = love.graphics.getWidth(), love.graphics.getHeight()
-    local helpY = winH - 40
-    love.graphics.printf("F5: Start Tracking  F7: Save Snapshot  F6: Revert Snapshot", 0, helpY, winW - 10, "right")
-    love.graphics.printf("Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 20, winW - 10, "right")
+    local helpY = winH - 60
+    love.graphics.printf("F5: Start Tracking  F6: Revert Snapshot  F7: Save Snapshot", 0, helpY, winW - 10, "right")
+    love.graphics.printf("F8: Save Level  F9: Next Level  F10: Load Level  L: List Levels", 0, helpY + 18, winW - 10, "right")
+    love.graphics.printf("Ctrl+Z: Undo  Ctrl+Y: Redo", 0, helpY + 36, winW - 10, "right")
 
+    -- drop the old footer "Selected Level" text to reduce left-corner clutter
+
+    -- Saved Level dropdown-style menu (bottom-right)
+    LevelSelectUI.x = winW - LevelSelectUI.buttonWidth - 10
+    LevelSelectUI.y = winH - 140
+
+    -- Button line
+    local selectedFile = (#LevelManager.files > 0) and (LevelManager.files[LevelManager.selectedIndex] or "(none)") or "(none)"
+    love.graphics.setColor(0.15, 0.15, 0.15, 0.8)
+    love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y, LevelSelectUI.buttonWidth, LevelSelectUI.buttonHeight)
+    love.graphics.print("Level: " .. selectedFile, LevelSelectUI.x + 8, LevelSelectUI.y + 6)
+    love.graphics.print(LevelSelectUI.isOpen and "▲" or "▼", LevelSelectUI.x + LevelSelectUI.buttonWidth - 20, LevelSelectUI.y + 6)
+
+    -- Dropdown entries
+    if LevelSelectUI.isOpen then
+        local rows = math.min(#LevelManager.files, LevelSelectUI.maxRows)
+        local totalH = (rows * LevelSelectUI.rowHeight)
+        love.graphics.setColor(0, 0, 0, 0.6)
+        love.graphics.rectangle("fill", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+        love.graphics.setColor(1, 1, 1)
+        love.graphics.rectangle("line", LevelSelectUI.x, LevelSelectUI.y + LevelSelectUI.buttonHeight, LevelSelectUI.buttonWidth, totalH)
+
+        for i = 1, rows do
+            local fileName = LevelManager.files[i]
+            local cellY = LevelSelectUI.y + LevelSelectUI.buttonHeight + (i - 1) * LevelSelectUI.rowHeight
+            if i == LevelManager.selectedIndex then
+                love.graphics.setColor(0.9, 0.9, 0.2)
+            else
+                love.graphics.setColor(1, 1, 1)
+            end
+            love.graphics.print(string.format("%d. %s", i, fileName), LevelSelectUI.x + 8, cellY + 2)
+        end
+
+        if #LevelManager.files == 0 then
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.print("No saved levels yet (press F8)", LevelSelectUI.x + 8, LevelSelectUI.y + LevelSelectUI.buttonHeight + 2)
+        else
+            local deleteX = LevelSelectUI.x + LevelSelectUI.buttonWidth - LevelSelectUI.deleteButtonWidth - 8
+            local deleteY = LevelSelectUI.y + LevelSelectUI.buttonHeight + totalH + 8
+            love.graphics.setColor(0.65, 0.15, 0.15, 0.9)
+            love.graphics.rectangle("fill", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+            love.graphics.setColor(1, 1, 1)
+            love.graphics.rectangle("line", deleteX, deleteY, LevelSelectUI.deleteButtonWidth, LevelSelectUI.deleteButtonHeight)
+            love.graphics.print("Delete", deleteX + 12, deleteY + 6)
+        end
+    end
 
     local cellSize = GameManager.grid.cellSize
 
