@@ -1078,11 +1078,9 @@ function love.draw()
         if c.isTrigger then
             local cx = c.gridX * cellSize
             local cy = c.gridY * cellSize
+            -- Draw only the trigger image itself, no shadow/outline
             if triggerImg then
                 local scale = (cellSize * 0.55) / math.max(triggerImg:getWidth(), triggerImg:getHeight())
-                local shadowScale = scale * 1.15
-                love.graphics.setColor(1, 1, 1, 0.5)
-                love.graphics.draw(triggerImg, cx + cellSize/2, cy + cellSize/2 + 1, 0, shadowScale, shadowScale, triggerImg:getWidth()/2, triggerImg:getHeight()/2)
                 love.graphics.setColor(1, 1, 1, 1)
                 love.graphics.draw(triggerImg, cx + cellSize/2, cy + cellSize/2, 0, scale, scale, triggerImg:getWidth()/2, triggerImg:getHeight()/2)
             else
@@ -1095,6 +1093,7 @@ function love.draw()
                 love.graphics.setColor(1, 1, 1, 1)
                 love.graphics.printf("T", cx, cy + cellSize*0.35, cellSize, "center")
             end
+            love.graphics.setBlendMode("alpha")
         end
     end
     love.graphics.pop()
@@ -1130,11 +1129,9 @@ function love.draw()
             love.graphics.rectangle("fill", rectX, rectY, rectW, rectH)
 
             if s.isDynamite then
+                -- Draw only the dynamite image itself, no shadow/outline
                 if dynamiteImg then
                     local scale = (cellSize * 0.55) / math.max(dynamiteImg:getWidth(), dynamiteImg:getHeight())
-                    local shadowScale = scale * 1.15
-                    love.graphics.setColor(1, 1, 1, 0.5)
-                    love.graphics.draw(dynamiteImg, drawX + cellSize/2, drawY + cellSize/2 + 1, 0, shadowScale, shadowScale, dynamiteImg:getWidth()/2, dynamiteImg:getHeight()/2)
                     love.graphics.setColor(1, 1, 1, 1)
                     love.graphics.draw(dynamiteImg, drawX + cellSize/2, drawY + cellSize/2, 0, scale, scale, dynamiteImg:getWidth()/2, dynamiteImg:getHeight()/2)
                 else
@@ -1147,6 +1144,7 @@ function love.draw()
                     love.graphics.setColor(1,1,1,1)
                     love.graphics.printf("D", drawX, drawY + cellSize*0.3, cellSize, "center")
                 end
+                love.graphics.setBlendMode("alpha")
             end
             if b.isStatic then
                 love.graphics.setColor(1, 0, 0, 1)
